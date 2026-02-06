@@ -3,7 +3,7 @@ import sys
 import pandas as pd
 
 exit_flag = False
-input_dict = None
+input_dict = {1:[], 2:[]}
 
 while True:
     
@@ -88,14 +88,77 @@ while True:
                 break
 
     elif user_input == 'manual':
-        print("----Manual menu-----")
-        break
+        print("\n----Manual menu----\n")
+        while True:
+            folder_paths = input(
+                "Print one or several folder path(s) separated by , without spaces\n"
+                "Print 'esc' to return to previous menu\n"
+                "Select your option: "
+
+            )
+            if folder_paths == 'esc':
+                break
+            else:
+                # Parse provided string and identify valid folder path(s)             
+                valid_folder_paths = []
+                corrupted_folder_paths = []
+                duplicated_folder_path = []
+                if ',' in folder_paths:
+                    folder_paths_list = folder_paths.split(',')
+                    for folder_path in folder_paths_list:
+                        if os.path.isdir(folder_path):
+                            if folder_path not in valid_folder_paths:
+                                valid_folder_paths.append(folder_path)
+                            else:
+                                duplicated_folder_path.append(folder_path)
+                        else:
+                            corrupted_folder_paths.append(folder_path)
+                else:
+                    if os.path.isdir(folder_path):
+                        valid_folder_paths.append(folder_path)
+                    else:
+                        corrupted_folder_paths.append(folder_path)
+
+            # Check whether valid folder path(s) exist
+            if  valid_folder_paths:
+                print(f"\nValid folder paths has been identified {valid_folder_paths}")
+            else:
+                print("Valid folder paths has not been identified")    
+                continue
+            if duplicated_folder_path:
+                print(f"Duplicates were excluded {duplicated_folder_path}")
+            if corrupted_folder_paths:
+                print(f"Corrupted input that won't be processed {corrupted_folder_paths}")
+
+            for valid_folder_path in valid_folder_paths:
+                while True:
+                    print("\n----Processing depth menu----\n")
+                    processing_depth = input(
+                        "Print 2 to process the entire nested hierarchy\n"
+                        "Print 1 to process direct child files only\n"
+                        "Print 'esc' to skip folder path\n"
+                        f"Select option for {valid_folder_path}: "
+                    )
+                    if processing_depth == "esc":
+                        break
+                    elif int(processing_depth) == 2:
+                        input_dict[2].append(valid_folder_path)
+                        break
+                    elif int(processing_depth) == 1:
+                        input_dict[1].append(valid_folder_path)
+                        break
+                    else:
+                        print("Invalid input please try again\n")
+                        continue
+
+            # Exit loop
+            exit_flag = True
+            break
     elif user_input == 'esc':
         print("\nScript terminated\n")
         break
     else:
         print("\nInvalid input provided please try again\n")
         continue
-
 print("Input obtained successfully")
 print(input_dict)
