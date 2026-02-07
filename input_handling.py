@@ -1,6 +1,7 @@
 import os
 import sys
 import pandas as pd
+from itertools import combinations, product
 
 exit_flag = False
 input_dict = {1:[], 2:[]}
@@ -10,7 +11,6 @@ while True:
     # Main loop exit condition
     if exit_flag:
         break
-    
     # Request user to select data provision options
     print("\n----Main menu----\n")
     user_input = input(
@@ -94,7 +94,6 @@ while True:
                 "Print one or several folder path(s) separated by , without spaces\n"
                 "Print 'esc' to return to previous menu\n"
                 "Select your option: "
-
             )
             if folder_paths == 'esc':
                 break
@@ -160,5 +159,39 @@ while True:
     else:
         print("\nInvalid input provided please try again\n")
         continue
+
+# Verify Parent-Child relationship
+if (len(input_dict[2])) > 1:
+    pairs_key_2 = list(combinations(input_dict[2], 2))
+
+if input_dict[1] and input_dict[2]:
+    pairs_key_1_and_2 = list(product(input_dict[1], input_dict[2]))
+
+# Function that identifies Parent-Child relationship for a given pair of folder paths
+def get_child(path_pair):
+    path_a, path_b = path_pair
+    a_abs = os.path.abspath(path_a)
+    b_abs = os.path.abspath(path_b)
+
+    #check if a child of b
+    if os.path.commonpath([b_abs])==os.path.commonpath([b_abs, a_abs]):
+        return path_a
+    elif os.path.commonpath([a_abs])==os.path.commonpath([a_abs, b_abs]):
+        return path_b
+    else:
+        return False
+
+print(pairs_key_2)
+print("-----")
+print(pairs_key_1_and_2)
+
+# Identify folder path(s) that needs to be removed
+remove_from_key_2 = [get_child(path_pair) for path_pair in pairs_key_2]
+remove_from_key_1 = [get_child(path_pair) for path_pair in pairs_key_1_and_2]
+
+# Normalize folder path(s) scope
+input_dict[2] = list(set(input_dict[2]) - set(remove_from_key_2))
+input_dict[1] = list(set(input_dict[1]) - set(remove_from_key_1))
+
 print("Input obtained successfully")
 print(input_dict)
