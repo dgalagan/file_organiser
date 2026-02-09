@@ -64,9 +64,8 @@ def open_csv(csv_path):
         print("\nProvided csv file empty or corrupted and could not be opened\n")
         return None
     
-def validate_df_cols(df, required_cols):
+def validate_df_cols(df_cols, required_cols):
     # Check whether required columns are available
-    df_cols = {*df}
     if required_cols > df_cols:
         missing_cols = required_cols - df_cols
         print(f"\nRequired columns {missing_cols} are missing\n")
@@ -102,6 +101,14 @@ def filter_df(df, condition):
     else:
         return filtered_df
 
+def parse_path(path, separator=None):
+    
+    if separator is None:
+        return path
+    
+    return path.split(separator)
+
+
 class ProcessingDepth(IntEnum):
     DIRECT_SUB = 0
     FULL_HIERARCHY = 1
@@ -114,60 +121,85 @@ FOLDER_PATH_TEST_COL = "FolderPathTest"
 PROCESSING_DEPTH_TEST_COL = "ProcessingDepthTest"
 TEST_COLS = [FOLDER_PATH_TEST_COL, PROCESSING_DEPTH_TEST_COL]
 
-exit_flag = False
-file_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
+
+
 
 if __name__ == "__main__":
     
+    folder_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
+
+    exit_main_loop = False
+    exit_condition = False
+
     while True:
         
         # Main loop exit condition
-        if exit_flag:
+        if exit_main_loop:
+            break
+
+        if exit_condition:
+            break
+
+        # Request user to select data provision options
+        main_menu_input = input(
+            "\n----Main menu----\n"
+            "Print 'csv' to load folder path(s) from CSV\n"
+            "Print 'manual' to provide folder path(s) manually\n"
+            "Print 'close' to suspend the script\n"
+            "Select your option: "
+        ).strip().lower()
+
+        # Exit options
+        if main_menu_input == 'close':
+            exit_main_loop = True
             break
         
-        # Request user to select data provision options
-        print("\n----Main menu----\n")
-        data_input_option = get_data_input_option()
-
-        if data_input_option == 'csv':
-            print("\n----CSV menu----\n")
+        # User input processing
+        if main_menu_input == 'csv':
             while True:
                 # Request user to provide link to csv file
-                csv_input = input(
+                csv_menu_input = input(
+                    "\n----CSV menu----\n"
                     "Provide link to csv file\n"
                     "Print 'esc' to return to previous menu\n"
                     "Print 'close' to suspend the script\n"
                     "Enter your option: "
                 )
-                if csv_input == 'esc':
+                if csv_menu_input == "esc":
+                    break
+                elif csv_menu_input == "close":
+                    exit_main_loop = True
                     break
                 
                 # Open CSV file as dataframe
-                csv_data = open_csv(csv_input)
+                csv_data = open_csv(csv_menu_input)
                 if csv_data is None:
                     continue
                 
                 # Validate CSV columns
-                validated_csv_data = validate_df_cols(csv_data, REQUIRED_COLS)
-                if not validated_csv_data:
+                csv_cols = {*csv_data}
+                
+                if not validate_df_cols(set(csv_cols), set(REQUIRED_COLS)):
                     continue
                 
                 # Validate processing depth
-                validated_csv_data[PROCESSING_DEPTH_TEST_COL] = validated_csv_data[PROCESSING_DEPTH_COL].apply(
+                csv_data[PROCESSING_DEPTH_TEST_COL] = csv_data[PROCESSING_DEPTH_COL].apply(
                     lambda x: True if x in [ProcessingDepth.DIRECT_SUB, ProcessingDepth.FULL_HIERARCHY] else False
                     )
-                validated_csv_data[FOLDER_PATH_TEST_COL] = validated_csv_data[PROCESSING_DEPTH_COL].apply(
+                csv_data[FOLDER_PATH_TEST_COL] = csv_data[FOLDER_PATH_COL].apply(
                     lambda x: True if is_dir(x) else False
                     )
                 
                 # Normalize CSV data 
-                normalized_csv_data = remove_duplicates(validated_csv_data, column=FOLDER_PATH_COL)
+                normalized_csv_data = remove_duplicates(csv_data, column=FOLDER_PATH_COL)
+                
                 if normalized_csv_data is None:
                     continue
                 
                 # Select valid entries
                 condition = (normalized_csv_data[FOLDER_PATH_TEST_COL] == True) & (normalized_csv_data[PROCESSING_DEPTH_TEST_COL] == True)
                 filtered_csv_data = filter_df(normalized_csv_data, condition)
+                
                 if filtered_csv_data is None:
                     continue
                 
@@ -180,105 +212,142 @@ if __name__ == "__main__":
                 )
                 
                 # Update input dictionary
-                input_dict = transformed_data.to_dict()[FOLDER_PATH_COL]
+                folder_scope = transformed_data.to_dict()[FOLDER_PATH_COL]
                 
-                # Exit loop
-                exit_flag = True
-                break
-        elif data_input_option == 'manual':
-            print("\n----Manual menu----\n")
+                # Exit condition check
+                if folder_scope[ProcessingDepth.DIRECT_SUB] or folder_scope[ProcessingDepth.FULL_HIERARCHY]:
+                    exit_condition = True
+                    break
+                else:
+                    print(f"\nNo folder paths to process {folder_scope}")
+                    exit_main_loop = True
+                    break
+
+        elif main_menu_input == 'manual':
             while True:
-                folder_paths = input(
+                manual_menu_input = input(
+                    "\n----Manual menu----\n"
                     "Print one or several folder path(s) separated by , without spaces\n"
                     "Print 'esc' to return to previous menu\n"
                     "Print 'close' to suspend the script\n"
                     "Select your option: "
-                )
-                if folder_paths == 'esc':
-                    break
+                ).strip().lower()
                 
-                # Parse provided string and identify valid folder path(s)             
-                valid_folder_paths = []
-                corrupted_folder_paths = []
-                duplicated_folder_path = []
-                if ',' in folder_paths:
-                    folder_paths_list = folder_paths.split(',')
-                    for folder_path in folder_paths_list:
-                        if os.path.isdir(folder_path):
-                            if folder_path not in valid_folder_paths:
-                                valid_folder_paths.append(folder_path)
-                            else:
-                                duplicated_folder_path.append(folder_path)
-                        else:
-                            corrupted_folder_paths.append(folder_path)
+                # Exit options
+                if manual_menu_input == "esc":
+                    break
+                elif manual_menu_input == "close":
+                    exit_main_loop = True
+                    break
+
+                # Parse folder path(s)
+                path_separator = ','
+                
+                if path_separator in manual_menu_input:
+                    folder_paths_list = manual_menu_input.split(path_separator)
                 else:
-                    if os.path.isdir(folder_path):
-                        valid_folder_paths.append(folder_path)
-                    else:
-                        corrupted_folder_paths.append(folder_path)
+                    folder_paths_list = [manual_menu_input]
+                
+                valid_folder_paths = [folder_path for folder_path in folder_paths_list if is_dir(folder_path)]
+                corrupted_folder_paths = [folder_path for folder_path in folder_paths_list if not is_dir(folder_path)]
 
                 # Check whether valid folder path(s) exist
-                if  valid_folder_paths:
-                    print(f"\nValid folder paths has been identified {valid_folder_paths}")
+                if valid_folder_paths:
+                    print(f"Valid input identified {valid_folder_paths}")    
                 else:
-                    print("Valid folder paths has not been identified")    
+                    print("Valid folder paths has not been identified")
                     continue
-                if duplicated_folder_path:
-                    print(f"Duplicates were excluded {duplicated_folder_path}")
+                
+                # Notify user about corrupted entries
                 if corrupted_folder_paths:
-                    print(f"Corrupted input that won't be processed {corrupted_folder_paths}")
+                    print(f"Corrupted input identified and won't be processed {corrupted_folder_paths}")
 
                 for valid_folder_path in valid_folder_paths:
+                    
+                    exit_for_loop = False
+                    if exit_for_loop:
+                        break
+                    # Remove path from the list ---- Check how to handle potential duplicates
+                    valid_folder_paths.remove(valid_folder_path)
+
                     while True:
-                        print("\n----Processing depth menu----\n")
-                        processing_depth = input(
-                            "Print 1 to process the entire nested hierarchy\n"
+                        processing_depth_menu_input = input(
+                            "\n----Processing depth menu----\n"
                             "Print 0 to process direct child files only\n"
+                            "Print 1 to process the entire nested hierarchy\n"
                             "Print 'skip' to skip folder path\n"
                             "Print 'esc' to return to previous menu\n"
                             "Print 'close' to suspend the script\n"
                             f"Select option for {valid_folder_path}: "
-                        )
-                        if processing_depth == "skip":
+                        ).strip().lower()
+
+                        # Exit options
+                        if processing_depth_menu_input == "skip":
                             break
-                        elif int(processing_depth) == 0:
-                            input_dict[0].append(valid_folder_path)
+                        elif processing_depth_menu_input == "esc":
+                            exit_for_loop = True
                             break
-                        elif int(processing_depth) == 1:
-                            input_dict[1].append(valid_folder_path)
+                        elif processing_depth_menu_input == "close":
+                            exit_for_loop = True
+                            exit_main_loop = True
+                            break
+                        # User input processing
+                        if int(processing_depth_menu_input) == 0:
+                            folder_scope[ProcessingDepth.DIRECT_SUB].append(valid_folder_path)
+                            break
+                        elif int(processing_depth_menu_input) == 1:
+                            folder_scope[ProcessingDepth.FULL_HIERARCHY].append(valid_folder_path)
                             break
                         else:
                             print("Invalid input please try again\n")
-                            continue
-
-                # Exit loop
-                exit_flag = True
-                break
-        elif data_input_option == 'close':
-            print("\nScript terminated\n")
-            break
+                            continue                        
+                
+                # Exit handling 
+                if exit_for_loop == True and exit_main_loop == False:
+                    continue
+                elif exit_for_loop == True and exit_main_loop == True:
+                    break
+                else:
+                    pass 
+            
+                # Exit condition check 
+                if folder_scope[ProcessingDepth.DIRECT_SUB] or folder_scope[ProcessingDepth.FULL_HIERARCHY]:
+                    exit_condition = True
+                    break
+                else:
+                    print(f"\nNo folder paths to process {folder_scope}")
+                    exit_main_loop = True
+                    break
+        
         else:
             print("\nInvalid input provided please try again\n")
             continue
+    
+    if exit_main_loop:
+        
+        print("\nScript terminated\n")
+            
+    if exit_condition:
+        
+        # Verify Parent-Child relationship
+        pairs_key_0_and_1 = []
+        pairs_key_1 = []
+        
+        if (len(folder_scope[ProcessingDepth.FULL_HIERARCHY])) > 1:
+            pairs_key_1 = list(combinations(folder_scope[ProcessingDepth.FULL_HIERARCHY], 2))
 
-    # Verify Parent-Child relationship
-    if (len(input_dict[2])) > 1:
-        pairs_key_2 = list(combinations(input_dict[2], 2))
+        if folder_scope[ProcessingDepth.DIRECT_SUB] and folder_scope[ProcessingDepth.FULL_HIERARCHY]:
+            pairs_key_0_and_1 = list(product(folder_scope[ProcessingDepth.DIRECT_SUB], folder_scope[ProcessingDepth.FULL_HIERARCHY]))
 
-    if input_dict[1] and input_dict[2]:
-        pairs_key_1_and_2 = list(product(input_dict[1], input_dict[2]))
+        # Identify folder path(s) that needs to be removed
+        remove_from_key_2 = [get_child_dir(path_pair) for path_pair in pairs_key_1]
+        remove_from_key_1 = [get_child_dir(path_pair) for path_pair in pairs_key_0_and_1]
 
-    print(pairs_key_2)
-    print("-----")
-    print(pairs_key_1_and_2)
+        # Normalize folder path(s) scope
+        folder_scope[ProcessingDepth.FULL_HIERARCHY] = list(set(folder_scope[ProcessingDepth.FULL_HIERARCHY]) - set(remove_from_key_2))
+        folder_scope[ProcessingDepth.DIRECT_SUB] = list(set(folder_scope[ProcessingDepth.DIRECT_SUB]) - set(remove_from_key_1))
 
-    # Identify folder path(s) that needs to be removed
-    remove_from_key_2 = [get_child_dir(path_pair) for path_pair in pairs_key_2]
-    remove_from_key_1 = [get_child_dir(path_pair) for path_pair in pairs_key_1_and_2]
+        print("\nInput obtained successfully\n")
+        print(folder_scope)
 
-    # Normalize folder path(s) scope
-    input_dict[2] = list(set(input_dict[2]) - set(remove_from_key_2))
-    input_dict[1] = list(set(input_dict[1]) - set(remove_from_key_1))
-
-    print("Input obtained successfully")
-    print(input_dict)
+    
