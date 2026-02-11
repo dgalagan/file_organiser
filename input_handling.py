@@ -6,7 +6,7 @@ from enum import IntEnum
 def is_file(path):
     return os.path.isfile(path)
 
-def is_dir(path):
+def is_folder(path):
     return os.path.isdir(path)
 
 def get_file_extension(path):
@@ -17,25 +17,12 @@ def get_file_basename(path):
     file_basename, _ = os.path.splitext(path)
     return file_basename
 
-def get_child_dir(path_pair):
-    path_a, path_b = path_pair
-    a_abs = os.path.abspath(path_a)
-    b_abs = os.path.abspath(path_b)
-
-    #check if a child of b
-    if os.path.commonpath([b_abs])==os.path.commonpath([b_abs, a_abs]):
-        return path_a
-    elif os.path.commonpath([a_abs])==os.path.commonpath([a_abs, b_abs]):
-        return path_b
-    else:
-        return False
-
-def parse_path(path, separator=None):
+def parse_paths(paths, separator=None):
     
     if separator is None:
-        return path
+        return paths
     
-    return path.split(separator)
+    return paths.split(separator)
 
 def open_csv(path):
     
@@ -72,10 +59,11 @@ def remove_duplicates(df, column_name=None):
 
     # Check whether column provided
     if column_name is None:
-        print(f"❌ Please provide column name to remove dupliates from")
-        return None
-    
-    df_normalized = df.drop_duplicates(
+        df_normalized = df.drop_duplicates(
+            inplace=False
+        )
+    else:
+        df_normalized = df.drop_duplicates(
             column_name, 
             inplace=False
             )
@@ -90,15 +78,73 @@ def filter_df(df, condition):
     else:
         return filtered_df
 
+def get_pairs_from_key(folder_scope, key=None):
+    if key is None:
+        return None
+    path_pairs = list(combinations(folder_scope[key], 2))
+    return path_pairs
+
+def get_pairs_between_keys(folder_scope, key_a=None, key_b=None):
+    if key_a is None or key_b is None:
+        return None
+    path_pairs = list(product(folder_scope[key_a], folder_scope[key_b]))
+    return path_pairs
+
+def get_child_folder(path_pair):
+    path_a, path_b = path_pair
+    a_abs = os.path.abspath(path_a)
+    b_abs = os.path.abspath(path_b)
+
+    #check if a child of b
+    if os.path.commonpath([b_abs])==os.path.commonpath([b_abs, a_abs]):
+        return path_a
+    elif os.path.commonpath([a_abs])==os.path.commonpath([a_abs, b_abs]):
+        return path_b
+    else:
+        return None
+
+def collect_child_folders(path_pairs):
+    child_folders = []
+    for path_pair in path_pairs:
+        child_path = get_child_folder(path_pair)
+        if child_path is not None:
+            child_folders.append(child_path)
+    return child_folders
+
+def remove_redundant_folder_paths(folder_scope):
+    # Construct folder paths pairs in cases where overlap could occur
+    pairs_between_direct_and_full = get_pairs_from_key(
+        folder_scope, 
+        key_a=ProcessingDepth.DIRECT_SUB,
+        key_b=ProcessingDepth.FULL_HIERARCHY
+        )
+    pairs_from_full = get_pairs_between_keys(
+        folder_scope,
+        key=ProcessingDepth.FULL_HIERARCHY
+        )
+
+    # Collect redundant folder paths
+    remove_from_direct = collect_child_folders(pairs_between_direct_and_full)
+    remove_from_full = collect_child_folders(pairs_from_full)
+
+    if remove_from_direct:
+        print(f"⚠️  Redundand paths identified, {remove_from_direct} will be removed from DIRECT_SUB key")
+    if remove_from_full:
+        print(f"⚠️  Redundand paths identified, {remove_from_full} will be removed from FULL_HIERARCHY key")
+
+    # Normalize folder path(s) scope
+    folder_scope[ProcessingDepth.DIRECT_SUB] = list(set(folder_scope[ProcessingDepth.DIRECT_SUB]) - set(remove_from_direct))
+    folder_scope[ProcessingDepth.FULL_HIERARCHY] = list(set(folder_scope[ProcessingDepth.FULL_HIERARCHY]) - set(remove_from_full))
+
+    return folder_scope
+
 class ProcessingDepth(IntEnum):
     DIRECT_SUB = 0
     FULL_HIERARCHY = 1
 
+
 if __name__ == "__main__":
-    
-    path_separator = ','
-    folder_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
-    
+        
     # Fixed data schema
     FOLDER_PATH_COL = "FolderPath"
     PROCESSING_DEPTH_COL = "ProcessingDepth"
@@ -116,6 +162,11 @@ if __name__ == "__main__":
     terminate_main_loop = False
     terminate_for_loop = False
     exit_condition = False
+
+    # Other params
+    paths_separator = ','
+    folder_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
+    dup_search_col = FOLDER_PATH_COL
 
     while True:
         # Request user to select data provision options
@@ -176,11 +227,13 @@ if __name__ == "__main__":
                             lambda x: True if x in [ProcessingDepth.DIRECT_SUB, ProcessingDepth.FULL_HIERARCHY] else False
                             )
                         csv_data[FOLDER_PATH_TEST_COL] = csv_data[FOLDER_PATH_COL].apply(
-                            lambda x: True if is_dir(x) else False
+                            lambda x: True if is_folder(x) else False
                             )
-                        # Normalize CSV data 
-                        normalized_csv_data = remove_duplicates(csv_data, column_name=FOLDER_PATH_COL)
-                        print("✅ Duplicates removed successfully")
+                        # Normalize CSV data
+                        normalized_csv_data = remove_duplicates(csv_data)
+                        duplicates_count = csv_data.shape[0] - normalized_csv_data.shape[0]
+                        if duplicates_count:
+                            print(f"✅ {duplicates_count} duplicate(s) removed successfully")
                         # Select valid entries
                         condition = (normalized_csv_data[FOLDER_PATH_TEST_COL] == True) & (normalized_csv_data[PROCESSING_DEPTH_TEST_COL] == True)
                         filtered_csv_data = filter_df(normalized_csv_data, condition)
@@ -250,7 +303,7 @@ if __name__ == "__main__":
                         try:
                             folder_paths = input(
                                 "\n↩️  Press 'Ctrl+C' to go back\n"
-                                f"⌨️  Please provide one or several folder path(s) separated with {path_separator}: "
+                                f"⌨️  Please provide one or several folder path(s) separated with {paths_separator}: "
                                 )
                         except KeyboardInterrupt:
                             print("")
@@ -258,13 +311,13 @@ if __name__ == "__main__":
                             break
                         
                         # Process folder paths
-                        if path_separator in folder_paths:
-                            folder_paths_list = folder_paths.split(path_separator)
+                        if paths_separator in folder_paths:
+                            folder_paths_list = parse_paths(folder_paths, paths_separator)
                         else:
                             folder_paths_list = [folder_paths]
                         
-                        valid_folder_paths = [folder_path for folder_path in folder_paths_list if is_dir(folder_path)]
-                        corrupted_folder_paths = [folder_path for folder_path in folder_paths_list if not is_dir(folder_path)]
+                        valid_folder_paths = [folder_path for folder_path in folder_paths_list if is_folder(folder_path)]
+                        corrupted_folder_paths = [folder_path for folder_path in folder_paths_list if not is_folder(folder_path)]
 
                         # Notify user about valid entries  
                         count_valid_paths = len(valid_folder_paths)
@@ -358,7 +411,7 @@ if __name__ == "__main__":
             print("\n❌ Invalid input provided please try again")
             continue
         
-        # Main menu while loop exit handling 
+        # Loop control parameters check 
         if return_to_main:
             return_to_main = False
             continue
@@ -367,24 +420,9 @@ if __name__ == "__main__":
             terminate_main_loop = False
             break
         elif exit_condition:
-            # Verify Parent-Child relationship
-            pairs_key_0_and_1 = []
-            pairs_key_1 = []
-            
-            if (len(folder_scope[ProcessingDepth.FULL_HIERARCHY])) > 1:
-                pairs_key_1 = list(combinations(folder_scope[ProcessingDepth.FULL_HIERARCHY], 2))
-
-            if folder_scope[ProcessingDepth.DIRECT_SUB] and folder_scope[ProcessingDepth.FULL_HIERARCHY]:
-                pairs_key_0_and_1 = list(product(folder_scope[ProcessingDepth.DIRECT_SUB], folder_scope[ProcessingDepth.FULL_HIERARCHY]))
-
-            # Identify folder path(s) that needs to be removed
-            remove_from_key_2 = [get_child_dir(path_pair) for path_pair in pairs_key_1]
-            remove_from_key_1 = [get_child_dir(path_pair) for path_pair in pairs_key_0_and_1]
-
-            # Normalize folder path(s) scope
-            folder_scope[ProcessingDepth.FULL_HIERARCHY] = list(set(folder_scope[ProcessingDepth.FULL_HIERARCHY]) - set(remove_from_key_2))
-            folder_scope[ProcessingDepth.DIRECT_SUB] = list(set(folder_scope[ProcessingDepth.DIRECT_SUB]) - set(remove_from_key_1))
-            print(f"➡️  Input obtained successfully {folder_scope}\n")
+            # Remove redundant folder path(s)
+            folder_scope_normalized = remove_redundant_folder_paths(folder_scope)
+            print(f"➡️  Input obtained successfully {folder_scope_normalized}\n")
             break
         else:
             print("❓Unknown event")
