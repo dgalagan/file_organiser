@@ -85,17 +85,18 @@ def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame | None:
         return filtered_df
 
 def get_all_pairs(array: Iterable[Any]) -> list[tuple[Any, Any]]:
-    return list(combinations(array, 2))
+    return combinations(array, 2)
 
 def get_cross_pairs(array_a: Iterable[Any], array_b: Iterable[Any]) -> list[tuple[Any, Any]]:
-    return list(product(array_a, array_b))
+    return product(array_a, array_b)
 
-def get_child_folder(path_pair: Iterable[str]) -> str:
-    
+def get_child_folder(path_pair: Tuple[str, str]) -> str | None:
+    # Unpack tuple
     path_a, path_b = path_pair
+    # Validate input
     assert is_folder(path_a) == True and is_folder(path_b), "Pair must contain folder paths only." 
     
-    # Extract absolute path instead og 
+    # Extract absolute path instead of symbolic 
     abs_paths = [get_abs_path(path_a), get_abs_path(path_b)]
 
     # verify parent-child relationship
@@ -107,29 +108,26 @@ def get_child_folder(path_pair: Iterable[str]) -> str:
     else:
         return None
 
-def collect_child_folders(path_pairs: Iterable[Iterable[str]]) -> Iterable[str]:
-    child_folders = []
-    for path_pair in path_pairs:
-        child_path = get_child_folder(path_pair)
-        if child_path is not None:
-            child_folders.append(child_path)
-    return child_folders
-
 def remove_redundant_folder_paths(folder_scope):
-    # Construct folder paths pairs in cases where overlap could occur
-    pairs_between_direct_and_full = get_cross_pairs(
-        folder_scope[ProcessingDepth.DIRECT_SUB],
-        folder_scope[ProcessingDepth.FULL_HIERARCHY]
+    # Identify folder path(s) to be removed from direct sub list
+    remove_from_direct = [
+        child
+        for path_pair in get_cross_pairs(
+            folder_scope[ProcessingDepth.DIRECT_SUB],
+            folder_scope[ProcessingDepth.FULL_HIERARCHY]
         )
-    pairs_from_full = get_all_pairs(
-        folder_scope[ProcessingDepth.FULL_HIERARCHY]
+        if (child := get_child_folder(path_pair)) is not None
+    ]
+    # Identify folder path(s) to be removed from full hierarchy list
+    remove_from_full = [
+        child
+        for path_pair in get_all_pairs(
+            folder_scope[ProcessingDepth.FULL_HIERARCHY]
         )
+        if (child := get_child_folder(path_pair)) is not None
+    ]
 
-    # Collect redundant folder paths
-    remove_from_direct = collect_child_folders(pairs_between_direct_and_full)
-    remove_from_full = collect_child_folders(pairs_from_full)
-
-    # Normalize folder path(s) scope
+    # Normalize input scope
     if remove_from_direct:
         print(f"⚠️  Redundand paths identified, {remove_from_direct} will be removed from DIRECT_SUB key")
         folder_scope[ProcessingDepth.DIRECT_SUB] = list(set(folder_scope[ProcessingDepth.DIRECT_SUB]) - set(remove_from_direct))
