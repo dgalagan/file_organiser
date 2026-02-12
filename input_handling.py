@@ -2,9 +2,7 @@ from enum import IntEnum
 from itertools import combinations, product
 import os
 import pandas as pd
-from typing import Optional
-
-
+from typing import Optional, Iterable, Any, List, Tuple
 
 def is_file(path: str) -> bool:
     return os.path.isfile(path)
@@ -23,8 +21,8 @@ def get_file_basename(path: str) -> str:
 def get_abs_path(path: str) -> str:
     return os.path.abspath(path)
 
-def get_common_path(path: str) -> str:
-    return os.path.commonpath(path)
+def get_common_path(paths: Iterable[str]) -> str:
+    return os.path.commonpath(paths)
 
 def split_string(value: str, separator: Optional[str] = None) -> list[str]:
     if separator is None:
@@ -86,20 +84,30 @@ def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame | None:
     else:
         return filtered_df
 
-def get_child_folder(path_pair):
+def get_all_pairs(array: Iterable[Any]) -> list[tuple[Any, Any]]:
+    return list(combinations(array, 2))
+
+def get_cross_pairs(array_a: Iterable[Any], array_b: Iterable[Any]) -> list[tuple[Any, Any]]:
+    return list(product(array_a, array_b))
+
+def get_child_folder(path_pair: Iterable[str]) -> str:
+    
     path_a, path_b = path_pair
-    a_abs = get_abs_path(path_a)
-    b_abs = get_abs_path(path_b)
+    assert is_folder(path_a) == True and is_folder(path_b), "Pair must contain folder paths only." 
+    
+    # Extract absolute path instead og 
+    abs_paths = [get_abs_path(path_a), get_abs_path(path_b)]
 
     # verify parent-child relationship
-    if get_common_path([b_abs])==get_common_path([b_abs, a_abs]):
-        return path_a
-    elif get_common_path([a_abs])==get_common_path([a_abs, b_abs]):
-        return path_b
+    # If b equals to a common path in pair, mean b is parent so a is child and vice versa
+    if abs_paths[0] == get_common_path(abs_paths):
+        return abs_paths[1]
+    elif abs_paths[1] == get_common_path(abs_paths):
+        return abs_paths[0]
     else:
         return None
 
-def collect_child_folders(path_pairs):
+def collect_child_folders(path_pairs: Iterable[Iterable[str]]) -> Iterable[str]:
     child_folders = []
     for path_pair in path_pairs:
         child_path = get_child_folder(path_pair)
@@ -107,40 +115,27 @@ def collect_child_folders(path_pairs):
             child_folders.append(child_path)
     return child_folders
 
-def get_pairs_from_key(array, key=None):
-    path_pairs = list(combinations(folder_scope[key], 2))
-    return path_pairs
-
-def get_pairs_between_keys(folder_scope, key_a=None, key_b=None):
-    if key_a is None or key_b is None:
-        return None
-    path_pairs = list(product(folder_scope[key_a], folder_scope[key_b]))
-    return path_pairs
-
 def remove_redundant_folder_paths(folder_scope):
     # Construct folder paths pairs in cases where overlap could occur
-    pairs_between_direct_and_full = get_pairs_from_key(
-        folder_scope, 
-        key_a=ProcessingDepth.DIRECT_SUB,
-        key_b=ProcessingDepth.FULL_HIERARCHY
+    pairs_between_direct_and_full = get_cross_pairs(
+        folder_scope[ProcessingDepth.DIRECT_SUB],
+        folder_scope[ProcessingDepth.FULL_HIERARCHY]
         )
-    pairs_from_full = get_pairs_between_keys(
-        folder_scope,
-        key=ProcessingDepth.FULL_HIERARCHY
+    pairs_from_full = get_all_pairs(
+        folder_scope[ProcessingDepth.FULL_HIERARCHY]
         )
 
     # Collect redundant folder paths
     remove_from_direct = collect_child_folders(pairs_between_direct_and_full)
     remove_from_full = collect_child_folders(pairs_from_full)
 
+    # Normalize folder path(s) scope
     if remove_from_direct:
         print(f"⚠️  Redundand paths identified, {remove_from_direct} will be removed from DIRECT_SUB key")
+        folder_scope[ProcessingDepth.DIRECT_SUB] = list(set(folder_scope[ProcessingDepth.DIRECT_SUB]) - set(remove_from_direct))
     if remove_from_full:
         print(f"⚠️  Redundand paths identified, {remove_from_full} will be removed from FULL_HIERARCHY key")
-
-    # Normalize folder path(s) scope
-    folder_scope[ProcessingDepth.DIRECT_SUB] = list(set(folder_scope[ProcessingDepth.DIRECT_SUB]) - set(remove_from_direct))
-    folder_scope[ProcessingDepth.FULL_HIERARCHY] = list(set(folder_scope[ProcessingDepth.FULL_HIERARCHY]) - set(remove_from_full))
+        folder_scope[ProcessingDepth.FULL_HIERARCHY] = list(set(folder_scope[ProcessingDepth.FULL_HIERARCHY]) - set(remove_from_full))
 
     return folder_scope
 
