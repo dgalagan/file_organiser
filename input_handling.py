@@ -1,37 +1,45 @@
+from enum import IntEnum
+from itertools import combinations, product
 import os
 import pandas as pd
-from itertools import combinations, product
-from enum import IntEnum
+from typing import Optional
 
-def is_file(path):
+
+
+def is_file(path: str) -> bool:
     return os.path.isfile(path)
 
-def is_folder(path):
+def is_folder(path:str) -> bool:
     return os.path.isdir(path)
 
-def get_file_extension(path):
+def get_file_extension(path: str) -> str:
     _, file_extension = os.path.splitext(path)
     return file_extension
 
-def get_file_basename(path):
+def get_file_basename(path: str) -> str:
     file_basename, _ = os.path.splitext(path)
     return file_basename
 
-def parse_paths(paths, separator=None):
-    
-    if separator is None:
-        return paths
-    
-    return paths.split(separator)
+def get_abs_path(path: str) -> str:
+    return os.path.abspath(path)
 
-def open_csv(path):
+def get_common_path(path: str) -> str:
+    return os.path.commonpath(path)
+
+def split_string(value: str, separator: Optional[str] = None) -> list[str]:
+    if separator is None:
+        return value
+    
+    return value.split(separator)
+
+def open_csv(path: str) -> pd.DataFrame | None:
     
     # Check whether provided link is file, otherwise continue
     if not is_file(path):
         print(f"\n❌ Provided path {path} is not a file")
         return None
     
-    # Check whether file extension == 'csv', otherwise continu
+    # Check whether file extension == 'csv', otherwise continue
     file_extension = get_file_extension(path)
     if not file_extension == '.csv':
         print(f"\n❌ Provided file extension is not supported {file_extension}")
@@ -55,7 +63,7 @@ def validate_df_cols(df_cols, required_cols):
         print(f"✅ Required columns {required_cols} identified")
         return True
 
-def remove_duplicates(df, column_name=None):
+def remove_duplicates(df: pd.DataFrame, column_name: Optional[str] = None) -> pd.DataFrame:
 
     # Check whether column provided
     if column_name is None:
@@ -69,7 +77,7 @@ def remove_duplicates(df, column_name=None):
             )
     return df_normalized  
 
-def filter_df(df, condition):
+def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame | None:
     filtered_df = df[condition]
     
     if filtered_df.empty:
@@ -78,27 +86,15 @@ def filter_df(df, condition):
     else:
         return filtered_df
 
-def get_pairs_from_key(folder_scope, key=None):
-    if key is None:
-        return None
-    path_pairs = list(combinations(folder_scope[key], 2))
-    return path_pairs
-
-def get_pairs_between_keys(folder_scope, key_a=None, key_b=None):
-    if key_a is None or key_b is None:
-        return None
-    path_pairs = list(product(folder_scope[key_a], folder_scope[key_b]))
-    return path_pairs
-
 def get_child_folder(path_pair):
     path_a, path_b = path_pair
-    a_abs = os.path.abspath(path_a)
-    b_abs = os.path.abspath(path_b)
+    a_abs = get_abs_path(path_a)
+    b_abs = get_abs_path(path_b)
 
-    #check if a child of b
-    if os.path.commonpath([b_abs])==os.path.commonpath([b_abs, a_abs]):
+    # verify parent-child relationship
+    if get_common_path([b_abs])==get_common_path([b_abs, a_abs]):
         return path_a
-    elif os.path.commonpath([a_abs])==os.path.commonpath([a_abs, b_abs]):
+    elif get_common_path([a_abs])==get_common_path([a_abs, b_abs]):
         return path_b
     else:
         return None
@@ -110,6 +106,16 @@ def collect_child_folders(path_pairs):
         if child_path is not None:
             child_folders.append(child_path)
     return child_folders
+
+def get_pairs_from_key(array, key=None):
+    path_pairs = list(combinations(folder_scope[key], 2))
+    return path_pairs
+
+def get_pairs_between_keys(folder_scope, key_a=None, key_b=None):
+    if key_a is None or key_b is None:
+        return None
+    path_pairs = list(product(folder_scope[key_a], folder_scope[key_b]))
+    return path_pairs
 
 def remove_redundant_folder_paths(folder_scope):
     # Construct folder paths pairs in cases where overlap could occur
@@ -142,7 +148,6 @@ class ProcessingDepth(IntEnum):
     DIRECT_SUB = 0
     FULL_HIERARCHY = 1
 
-
 if __name__ == "__main__":
         
     # Fixed data schema
@@ -160,13 +165,11 @@ if __name__ == "__main__":
     return_to_manual = False
     return_to_folder_path = False
     terminate_main_loop = False
-    terminate_for_loop = False
     exit_condition = False
 
     # Other params
     paths_separator = ','
     folder_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
-    dup_search_col = FOLDER_PATH_COL
 
     while True:
         # Request user to select data provision options
@@ -312,7 +315,7 @@ if __name__ == "__main__":
                         
                         # Process folder paths
                         if paths_separator in folder_paths:
-                            folder_paths_list = parse_paths(folder_paths, paths_separator)
+                            folder_paths_list = split_string(folder_paths, paths_separator)
                         else:
                             folder_paths_list = [folder_paths]
                         
