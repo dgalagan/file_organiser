@@ -25,6 +25,7 @@ def get_common_path(paths: Iterable[str]) -> str:
     return os.path.commonpath(paths)
 
 def split_string(value: str, separator: Optional[str] = None) -> list[str]:
+    
     if separator is None:
         return value
     
@@ -51,7 +52,7 @@ def open_csv(path: str) -> pd.DataFrame | None:
         print("\n❌ Provided CSV file empty or corrupted and could not be opened")
         return None
     
-def validate_df_cols(df_cols, required_cols):
+def validate_df_cols(df_cols, required_cols) -> bool:
     # Check whether required columns are available
     if required_cols > df_cols:
         missing_cols = required_cols - df_cols
@@ -84,11 +85,11 @@ def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame | None:
     else:
         return filtered_df
 
-def get_all_pairs(array: list[str]) -> Iterator[Tuple[Any, Any]]:
-    return combinations(array, 2)
+def get_all_pairs(paths: list[str]) -> Iterator[Tuple[Any, Any]]:
+    return combinations(paths, 2)
 
-def get_cross_pairs(array_a: list[str], array_b: list[str]) -> Iterator[Tuple[Any, Any]]:
-    return product(array_a, array_b)
+def get_cross_pairs(paths_a: list[str], paths_b: list[str]) -> Iterator[Tuple[Any, Any]]:
+    return product(paths_a, paths_b)
 
 def get_child_folder(path_pair: Tuple[str, str]) -> str | None:
     # Unpack tuple
@@ -110,29 +111,12 @@ def get_child_folder(path_pair: Tuple[str, str]) -> str | None:
 
 def find_subpaths_within(paths: list[str]) -> list[str]:
     return [child for path_pair in get_all_pairs(paths) if (child := get_child_folder(path_pair)) is not None]
-
+  
 def find_subpaths_against(paths: list[str], against_paths:list[str]) -> list[str]:
     return [child for path_pair in get_cross_pairs(paths, against_paths) if (child := get_child_folder(path_pair)) is not None]
-   
-def remove_redundant_folder_paths(folder_scope):
-    # Define keys
-    key_a = ProcessingDepth.DIRECT_SUB
-    key_b = ProcessingDepth.FULL_HIERARCHY
-    
-    # Identify folder path(s) to be removed from direct sub list
-    remove_from_direct = find_subpaths_against(folder_scope[ProcessingDepth.DIRECT_SUB], folder_scope[ProcessingDepth.FULL_HIERARCHY])
-    # Identify folder path(s) to be removed from full hierarchy list
-    remove_from_full = find_subpaths_within(folder_scope[ProcessingDepth.FULL_HIERARCHY])
-    
-    # Normalize input scope
-    if remove_from_direct:
-        print(f"⚠️  Redundand paths identified, {remove_from_direct} will be removed from DIRECT_SUB key")
-        folder_scope[key_a] = list(set(folder_scope[key_a]) - set(remove_from_direct))
-    if remove_from_full:
-        print(f"⚠️  Redundand paths identified, {remove_from_full} will be removed from FULL_HIERARCHY key")
-        folder_scope[key_b] = list(set(folder_scope[key_b]) - set(remove_from_full))
 
-    return folder_scope
+def remove_subpaths(paths: list[str], to_remove: list[str]) -> list[str]:
+        return list(set(paths) - set(to_remove))
 
 class ProcessingDepth(IntEnum):
     DIRECT_SUB = 0
@@ -413,8 +397,18 @@ if __name__ == "__main__":
             terminate_main_loop = False
             break
         elif exit_condition:
-            # Remove redundant folder path(s)
-            folder_scope_normalized = remove_redundant_folder_paths(folder_scope)
+            # Itentify subpaths
+            direct_subpaths = find_subpaths_against(folder_scope[ProcessingDepth.DIRECT_SUB], folder_scope[ProcessingDepth.FULL_HIERARCHY])
+            full_subpaths = find_subpaths_within(folder_scope[ProcessingDepth.FULL_HIERARCHY])
+            
+            # Remove subpaths
+            if direct_subpaths:
+                print(f"⚠️  Redundant paths identified, {direct_subpaths} and will be removed from {ProcessingDepth(0).name} key")
+                folder_scope[ProcessingDepth.DIRECT_SUB] = remove_subpaths(folder_scope[ProcessingDepth.DIRECT_SUB], direct_subpaths)
+            
+            if full_subpaths:
+                print(f"⚠️  Redundant paths identified, {full_subpaths} and will be removed from {ProcessingDepth(1).name} key")
+                folder_scope[ProcessingDepth.FULL_HIERARCHY] = remove_subpaths(folder_scope[ProcessingDepth.FULL_HIERARCHY], full_subpaths)
             print(f"➡️  Input obtained successfully {folder_scope}\n")
             break
         else:
