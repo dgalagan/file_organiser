@@ -139,45 +139,45 @@ class ConsoleMenu:
     RETURN = "↩️  Press 'Ctrl+C' to go back"
     CSV = "⌨️  Print 'csv' to load folder path(s) from CSV"
     MANUAL = "⌨️  Print 'manual' to provide folder path(s) manually"
-    CSV_INPUT = "⌨️  Print 'input' to provide link to CSV file"
-    MANUAL_INPUT = "⌨️  Print 'input' to provide one or several folder path(s)"
+    CSV_INPUT = "⌨️  Print 'load' to provide link to CSV file"
+    MANUAL_INPUT = "⌨️  Print 'enter' to provide one or several folder path(s)"
     DEPTH_0 = "⌨️  Print '0' to process direct child objects only"
     DEPTH_1 = "⌨️  Print '1' to process the entire nested hierarchy"
     SKIP = "⌨️  Print 'skip' to skip folder path"
 
     @classmethod
-    def main_menu(cls):
+    def main(cls):
         print("\n----Main menu----")
         print(cls.EXIT)
         print(cls.CSV)
         print(cls.MANUAL)
 
     @classmethod
-    def csv_menu(cls):
+    def csv(cls):
         print("\n----CSV menu----")
         print(cls.EXIT)
         print(cls.RETURN)
         print(cls.CSV_INPUT)
 
     @classmethod
-    def manual_menu(cls):
+    def manual(cls):
         print("\n----Manual menu----")
         print(cls.EXIT)
         print(cls.RETURN)
         print(cls.MANUAL_INPUT)
 
     @classmethod
-    def csv_menu_input(cls):
+    def csv_input(cls):
         print()
         print(cls.RETURN)
 
     @classmethod
-    def manual_menu_input(cls):
+    def manual_input(cls):
         print()
         print(cls.RETURN)
 
     @classmethod
-    def processing_depth_menu(cls):
+    def processing_depth(cls):
         print("\n----Processing depth menu----")
         print(cls.RETURN)
         print(cls.DEPTH_0)
@@ -186,28 +186,33 @@ class ConsoleMenu:
 
 # Command line interface logic
 # 1st level
-def main_loop(config):
-    # Unpack config
-    csv_config = config["csv_config"]
-    manual_config = config["manual_config"]
-    folder_scope = config["folder_scope"]
+def main_loop(menu_obj, input_dict):
     
-    while True:
-        # Request user inpu
-        ConsoleMenu.main_menu()
-        user_input = input("➜  Select your option: ").strip().lower()
+    input_handler = {
+        "csv": (menu_obj, csv_input_loop),
+        "manual": (menu_obj, manual_input_loop),
+        # "load": (menu_obj, csv_input_loop),
+        # "enter": (menu_obj, manual_input_loop)
+    }
 
+    while True:
+        # Request user input
+        menu_obj.main()
+        user_input = input("➜  Select your option: ").strip().lower()
+    
         # User input handling
         if user_input == 'exit':
             print("\n❌ Script terminated\n")
             break
-        elif user_input == 'csv':
-            in_action = csv_menu_loop(csv_config, folder_scope)
-        elif user_input == 'manual':
-            in_action = manual_menu_loop(manual_config, folder_scope)
-        else:
+
+        handler = input_handler.get(user_input)
+
+        if not handler:
             print("\n🔁 Invalid input provided please try again")
             continue
+        
+        menu_func, loop_func = handler
+        in_action = loop_func(menu_func, input_dict)
         
         # Loop control parameters check
         match in_action:
@@ -218,26 +223,26 @@ def main_loop(config):
                 continue
             case MenuActions.SUCCESS:
                 # Itentify subpaths
-                direct_subpaths = find_subpaths_against(folder_scope[ProcessingDepth.DIRECT_SUB], folder_scope[ProcessingDepth.FULL_HIERARCHY])
-                full_subpaths = find_subpaths_within(folder_scope[ProcessingDepth.FULL_HIERARCHY])
+                direct_subpaths = find_subpaths_against(input_dict[ProcessingDepth.DIRECT_SUB], input_dict[ProcessingDepth.FULL_HIERARCHY])
+                full_subpaths = find_subpaths_within(input_dict[ProcessingDepth.FULL_HIERARCHY])
                 # Remove subpaths
                 if direct_subpaths:
                     print(f"⚠️  Subpaths {direct_subpaths} identified in {ProcessingDepth(0).name} and will be removed")
-                    folder_scope[ProcessingDepth.DIRECT_SUB] = remove_subpaths(folder_scope[ProcessingDepth.DIRECT_SUB], direct_subpaths)
+                    input_dict[ProcessingDepth.DIRECT_SUB] = remove_subpaths(input_dict[ProcessingDepth.DIRECT_SUB], direct_subpaths)
                 if full_subpaths:
                     print(f"⚠️  Subpaths {full_subpaths} identified in {ProcessingDepth(1).name} and will be removed")
-                    folder_scope[ProcessingDepth.FULL_HIERARCHY] = remove_subpaths(folder_scope[ProcessingDepth.FULL_HIERARCHY], full_subpaths)
-                print(f"➡️  Input obtained successfully {folder_scope}\n")
+                    input_dict[ProcessingDepth.FULL_HIERARCHY] = remove_subpaths(input_dict[ProcessingDepth.FULL_HIERARCHY], full_subpaths)
+                print(f"➡️  Input obtained successfully {input_dict}\n")
                 break
 
-    return folder_scope
+    return input_dict
 
 # 2nd level
-def csv_menu_loop(csv_config, folder_scope):
+def selection_menu_loop(menu_func, input_handler, input_dict):
     while True:
         # Request user input
         try:
-            ConsoleMenu.csv_menu()
+            menu_func()
             user_input = input("➜  Select your option: ").strip().lower()
         except KeyboardInterrupt:
             print()
@@ -246,51 +251,35 @@ def csv_menu_loop(csv_config, folder_scope):
         # User input handling
         if user_input == "exit":
             return MenuActions.EXIT
-        elif user_input == "input":
-            in_action = csv_input_loop(csv_config, folder_scope)
-            # Loop control parameters check
-            if in_action is MenuActions.RETURN:
-                continue
-            return in_action
-        else:
-            print("\n🔁 Invalid input provided please try again")
-            continue
-def manual_menu_loop(manual_config, folder_scope):
-    while True:
-        # Request user input
-        try:
-            ConsoleMenu.manual_menu()
-            user_input = input("➜  Select your option: ").strip().lower()
-        except KeyboardInterrupt:
-            print("")
-            return MenuActions.RETURN
         
-        # User input handling
-        if user_input == "exit":
-            return MenuActions.EXIT
-        elif user_input == "input":
-            in_action = manual_input_loop(manual_config, folder_scope)
-            # Loop control parameters check
-            if in_action == MenuActions.RETURN:
-                continue
-            return in_action
-        else:
+        handler = input_handler.get(user_input)
+
+        if not handler:
             print("\n🔁 Invalid input provided please try again")
             continue
+        
+        menu_func, loop_func = handler
+        in_action = loop_func(menu_func, input_dict)
+        
+        if in_action is MenuActions.RETURN:
+            continue
+        
+        return in_action
 
 # 3rd level
-def csv_input_loop(csv_config, folder_scope):
-    # Unpack csv config
-    required_col1 = csv_config["required_col1"]
-    required_col2 = csv_config["required_col2"]
-    test_req1 = csv_config["test_req1"]
-    test_req2 = csv_config["test_req2"]
+def csv_input_loop(menu_obj, input_dict):
+    
+    # Function_constants
+    required_col1 = "FolderPath"
+    required_col2 = "ProcessingDepth"
+    test_req1 = "FolderPathTest"
+    test_req2 = "ProcessingDepthTest"
     required_cols = [required_col1, required_col2]
     
     while True:
         # Request user input
         try:
-            ConsoleMenu.csv_menu_input()
+            menu_obj.csv_input()
             user_input = input("⌨️  Please provide link to CSV file: ").strip().lower()
         except KeyboardInterrupt:
             print()
@@ -333,12 +322,12 @@ def csv_input_loop(csv_config, folder_scope):
         )
         # Update folder scope dictionary
         total_paths_added = 0
-        transformed_data_idxs = list(transformed_data.index.values)
-        for idx in transformed_data_idxs:
-            folder_scope[idx] = transformed_data[required_col1].loc[idx]
+        # transformed_data_idxs = list(transformed_data.index.values)
+        for idx in transformed_data.index.values:
+            input_dict[idx] = transformed_data[required_col1].iloc[idx]
             # Check if dict value is not empty and provide some notification
-            if folder_scope[idx]:
-                path_count = len(folder_scope[idx])
+            if input_dict[idx]:
+                path_count = len(input_dict[idx])
                 total_paths_added += path_count
                 print(f"✅ {path_count} folder path(s) identified for {ProcessingDepth(idx).name} processing")
     
@@ -347,18 +336,14 @@ def csv_input_loop(csv_config, folder_scope):
             return MenuActions.SUCCESS
         else:
             print("\n🔁 Valid folder path(s) are missing, please try again")
-            continue
-def manual_input_loop(manual_config, folder_scope):
+def manual_input_loop(menu_obj, input_dict):
     # Unpack manual config
-    paths_separator = manual_config["paths_separator"]
-    
+    paths_separator = ","
     while True:
         # Request user input
         try:
-            ConsoleMenu.manual_menu_input()
-            user_input = input(
-                f"⌨️  Please provide one or several folder path(s) separated with {paths_separator}: "
-                )
+            menu_obj.manual_input()
+            user_input = input(f"⌨️  Please provide one or several folder path(s) separated with {paths_separator}: ").strip().lower()
         except KeyboardInterrupt:
             print()
             return MenuActions.RETURN
@@ -394,16 +379,16 @@ def manual_input_loop(manual_config, folder_scope):
         add_direct_counter = 0
         add_full_counter = 0
         return_back = 0
-
+        
         for valid_folder_path in valid_folder_paths:
-            in_action = processing_depth_input_loop(valid_folder_path, folder_scope)
+            in_action = processing_depth_input_loop(menu_obj, valid_folder_path, input_dict)
             # Loop control parameters check
             match in_action:
                 case MenuActions.RETURN:
-                    print(f"\n⚠️  Please note that folder scope dictionary has been reset")
+                    print(f"\n⚠️  Please note that input dictionary has been reset")
                     # folder_scope = {ProcessingDepth.DIRECT_SUB:[],ProcessingDepth.FULL_HIERARCHY:[]} Why this is working differently
-                    folder_scope[ProcessingDepth.DIRECT_SUB] = []
-                    folder_scope[ProcessingDepth.FULL_HIERARCHY] = []
+                    input_dict[ProcessingDepth.DIRECT_SUB] = []
+                    input_dict[ProcessingDepth.FULL_HIERARCHY] = []
                     skip_counter = 0
                     add_direct_counter = 0
                     add_full_counter = 0
@@ -415,7 +400,6 @@ def manual_input_loop(manual_config, folder_scope):
                     add_direct_counter += 1
                 case MenuActions.ADD_FULL_HIERARCHY:
                     add_full_counter += 1
-
 
         # User notification
         total_paths_added = add_direct_counter + add_full_counter
@@ -429,50 +413,31 @@ def manual_input_loop(manual_config, folder_scope):
             return MenuActions.SUCCESS
         elif total_paths_added == 0:
             print("\n🔁 Valid folder path(s) are missing, please try again")
-            continue
 
 # 4th level
-def processing_depth_input_loop(valid_folder_path, folder_scope):
+def processing_depth_input_loop(menu_obj, folder_path, input_dict):
     
     while True:
         # Request user input
         try:
-            ConsoleMenu.processing_depth_menu()
-            user_input = input(f"➜  Select your option for {valid_folder_path}: ").strip().lower()
+            menu_obj.processing_depth()
+            user_input = input(f"➜  Select your option for {folder_path}: ").strip().lower()
         except KeyboardInterrupt:
             print()
             return MenuActions.RETURN
-
+        
+        # Loop control parameters check
         if user_input == "skip":
             return MenuActions.SKIP
         elif int(user_input) == 0:
-            folder_scope[ProcessingDepth.DIRECT_SUB].append(valid_folder_path)
+            input_dict[ProcessingDepth.DIRECT_SUB].append(folder_path)
             return MenuActions.ADD_DIRECT_SUB
         elif int(user_input) == 1:
-            folder_scope[ProcessingDepth.FULL_HIERARCHY].append(valid_folder_path)
+            input_dict[ProcessingDepth.FULL_HIERARCHY].append(folder_path)
             return MenuActions.ADD_FULL_HIERARCHY
         else:
             print("\n🔁 Invalid input provided please try again")
-            continue
-
-# Configuration
-config = {
-    "csv_config":{
-        "required_col1" : "FolderPath",
-        "test_req1": "FolderPathTest",
-        "required_col2": "ProcessingDepth",
-        "test_req2": "ProcessingDepthTest"
-    },
-    
-    "manual_config":{
-        "paths_separator": ","
-    },
-    
-    "folder_scope":{
-        ProcessingDepth.DIRECT_SUB:[],
-        ProcessingDepth.FULL_HIERARCHY:[]
-    }
-}
 
 if __name__ == "__main__":
-    folder_scope = main_loop(config)
+    folder_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
+    folder_scope = main_loop(ConsoleMenu, folder_scope)
