@@ -2,7 +2,7 @@ from enum import IntEnum, StrEnum, auto
 from itertools import combinations, product
 import os
 import pandas as pd
-from typing import Optional, Any, Iterable, Iterator, Tuple
+from typing import Optional, Any, Iterable, Iterator, Tuple, Callable
 
 def is_file(path: str) -> bool:
     return os.path.isfile(path)
@@ -32,35 +32,22 @@ def split_string(value: str, separator: Optional[str] = None) -> list[str]:
     return value.split(separator)
 
 def open_csv(path: str) -> pd.DataFrame | None:
-    
-    # Check whether provided link is file, otherwise continue
-    if not is_file(path):
-        print(f"\n❌ Provided path {path} is not a file")
-        return None
-    
-    # Check whether file extension == 'csv', otherwise continue
-    file_extension = get_file_extension(path)
-    if not file_extension == '.csv':
-        print(f"\n❌ Provided file extension is not supported {file_extension}")
-        return None
-
-    # Open csv file as dataframe, otherwise continue
     try:
         csv_data = pd.read_csv(path)
         return csv_data
     except:
-        print("\n❌ Provided CSV file empty or corrupted and could not be opened")
         return None
     
-def validate_df_cols(df_cols, required_cols) -> bool:
-    # Check whether required columns are available
-    if required_cols > df_cols:
-        missing_cols = required_cols - df_cols
-        print(f"❌ Required columns {missing_cols} are missing")
-        return False
-    else:
-        print(f"✅ Required columns {required_cols} identified")
-        return True
+def validate_cols(csv_cols: list[str], required_cols: list[str]) -> Tuple[bool, list | None]: 
+    csv_set = set(csv_cols)
+    required_set = set(required_cols)
+    
+    missing_cols = list(required_set - csv_set)
+
+    if missing_cols:
+        return True, missing_cols
+    
+    return False, None
 
 def remove_duplicates(df: pd.DataFrame, column_name: Optional[str] = None) -> pd.DataFrame:
 
@@ -80,10 +67,9 @@ def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame | None:
     filtered_df = df[condition]
     
     if filtered_df.empty:
-        print("Valid entries are absent\n")
         return None
-    else:
-        return filtered_df
+
+    return filtered_df
 
 def get_all_pairs(paths: list[str]) -> Iterator[Tuple[Any, Any]]:
     return combinations(paths, 2)
@@ -133,17 +119,17 @@ class MenuActions(StrEnum):
     ADD_DIRECT_SUB = auto()
     ADD_FULL_HIERARCHY = auto()
 
-class ConsoleMenu:
+class Menu:
 
-    EXIT = "🛑 Print 'exit' to suspend the script"
+    EXIT = "🛑 Type 'exit' to suspend the script"
     RETURN = "↩️  Press 'Ctrl+C' to go back"
-    CSV = "⌨️  Print 'csv' to load folder path(s) from CSV"
-    MANUAL = "⌨️  Print 'manual' to provide folder path(s) manually"
-    CSV_INPUT = "⌨️  Print 'load' to provide link to CSV file"
-    MANUAL_INPUT = "⌨️  Print 'enter' to provide one or several folder path(s)"
-    DEPTH_0 = "⌨️  Print '0' to process direct child objects only"
-    DEPTH_1 = "⌨️  Print '1' to process the entire nested hierarchy"
-    SKIP = "⌨️  Print 'skip' to skip folder path"
+    CSV = "⌨️  Type 'csv' to load folder path(s) from CSV"
+    MANUAL = "⌨️  Type 'manual' to provide folder path(s) manually"
+    CSV_INPUT = "⌨️  Type 'load' to provide link to CSV file"
+    MANUAL_INPUT = "⌨️  Type 'enter' to provide one or several folder path(s)"
+    DEPTH_0 = "⌨️  Type '0' to process direct child objects only"
+    DEPTH_1 = "⌨️  Type '1' to process the entire nested hierarchy"
+    SKIP = "⌨️  Type 'skip' to skip folder path"
 
     @classmethod
     def main(cls):
@@ -184,21 +170,37 @@ class ConsoleMenu:
         print(cls.DEPTH_1)
         print(cls.SKIP)
 
-# Command line interface logic
+# Command line helper functions
+def prompt_user(menu_func: Callable, prompt_text: str, strip: bool = True, lower: bool = True) -> Tuple[str | None, MenuActions | None]:
+    try:
+        menu_func()
+        user_input = input(prompt_text)
+        if strip:
+            user_input = user_input.strip()
+        if lower:
+            user_input = user_input.lower()
+        return user_input, None
+    except KeyboardInterrupt:
+        print()
+        return None, MenuActions.RETURN
+
+# Command line execution logic 
 # 1st level
 def main_loop(menu_obj, input_dict):
     
     input_handler = {
         "csv": (menu_obj, csv_input_loop),
         "manual": (menu_obj, manual_input_loop),
-        # "load": (menu_obj, csv_input_loop),
-        # "enter": (menu_obj, manual_input_loop)
     }
 
     while True:
         # Request user input
-        menu_obj.main()
-        user_input = input("➜  Select your option: ").strip().lower()
+        try:
+            menu_obj.main()
+            user_input = input("➜  Select your option: ").strip().lower()
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Type 'exit' to terminate the script")
+            continue
     
         # User input handling
         if user_input == 'exit':
@@ -208,7 +210,7 @@ def main_loop(menu_obj, input_dict):
         handler = input_handler.get(user_input)
 
         if not handler:
-            print("\n🔁 Invalid input provided please try again")
+            print("\n⚠️  Invalid input provided, 🔄 restarting")
             continue
         
         menu_func, loop_func = handler
@@ -238,62 +240,44 @@ def main_loop(menu_obj, input_dict):
     return input_dict
 
 # 2nd level
-def selection_menu_loop(menu_func, input_handler, input_dict):
-    while True:
-        # Request user input
-        try:
-            menu_func()
-            user_input = input("➜  Select your option: ").strip().lower()
-        except KeyboardInterrupt:
-            print()
-            return MenuActions.RETURN
-        
-        # User input handling
-        if user_input == "exit":
-            return MenuActions.EXIT
-        
-        handler = input_handler.get(user_input)
-
-        if not handler:
-            print("\n🔁 Invalid input provided please try again")
-            continue
-        
-        menu_func, loop_func = handler
-        in_action = loop_func(menu_func, input_dict)
-        
-        if in_action is MenuActions.RETURN:
-            continue
-        
-        return in_action
-
-# 3rd level
 def csv_input_loop(menu_obj, input_dict):
     
-    # Function_constants
-    required_col1 = "FolderPath"
-    required_col2 = "ProcessingDepth"
-    test_req1 = "FolderPathTest"
-    test_req2 = "ProcessingDepthTest"
+    # Required CSV columns for correct input validation
+    required_col1, required_col2 = ("FolderPath", "ProcessingDepth")
+    test_req1, test_req2 = ("FolderPathTest", "ProcessingDepthTest")
     required_cols = [required_col1, required_col2]
     
     while True:
         # Request user input
-        try:
-            menu_obj.csv_input()
-            user_input = input("⌨️  Please provide link to CSV file: ").strip().lower()
-        except KeyboardInterrupt:
-            print()
+        user_input, action = prompt_user(
+            menu_obj.csv_input, 
+            "⌨️  Please provide link to CSV file: ",
+            lower=False
+        )
+        if action is not None:
             return MenuActions.RETURN
 
+        # Check whether provided link is file, otherwise continue
+        if not is_file(user_input):
+            print(f"\n⚠️  Provided path '{user_input}' is not a file, 🔄 restarting")
+            continue    
+        # Check whether file extension == 'csv', otherwise continue
+        file_extension = get_file_extension(user_input)
+        if not file_extension == '.csv':
+            print(f"\n⚠️  Provided file extension '{file_extension}' is not supported, 🔄 restarting")
+            continue
         # Open CSV file as dataframe
         csv_data = open_csv(user_input)
         if csv_data is None:
+            print("\n⚠️  Provided CSV file empty or corrupted and could not be opened, 🔄 restarting")
             continue
         print("\n✅ CSV file opened successfully")
         # Validate CSV columns
-        csv_cols = {*csv_data}
-        if not validate_df_cols(set(csv_cols), set(required_cols)):
+        is_missing_cols, missing_cols = validate_cols({*csv_data}, required_cols)
+        if is_missing_cols:
+            print(f"⚠️  Required columns {missing_cols} are missing, please try again")
             continue
+        print(f"✅ Required columns {required_cols} identified")
         # Validate CSV data
         csv_data[test_req1] = csv_data[required_col1].apply(
             lambda x: True if is_folder(x) else False
@@ -310,7 +294,7 @@ def csv_input_loop(menu_obj, input_dict):
         condition = (normalized_csv_data[test_req1] == True) & (normalized_csv_data[test_req2] == True)
         filtered_csv_data = filter_df(normalized_csv_data, condition)
         if filtered_csv_data is None:
-            print("\n🔁 Valid folder path(s) are missing, please try again")
+            print("\n⚠️ Valid folder path(s) are missing, 🔄 restarting")
             continue
         print("✅ Valid folder path(s) filtered successfully")
         # Transform valid data and convert it into ditionary 
@@ -335,17 +319,19 @@ def csv_input_loop(menu_obj, input_dict):
         if total_paths_added > 0:
             return MenuActions.SUCCESS
         else:
-            print("\n🔁 Valid folder path(s) are missing, please try again")
+            print("\n⚠️  Valid folder path(s) are missing, 🔄 restarting")
 def manual_input_loop(menu_obj, input_dict):
-    # Unpack manual config
+    # Separator to parse user input
     paths_separator = ","
+    
     while True:
         # Request user input
-        try:
-            menu_obj.manual_input()
-            user_input = input(f"⌨️  Please provide one or several folder path(s) separated with {paths_separator}: ").strip().lower()
-        except KeyboardInterrupt:
-            print()
+        user_input, action = prompt_user(
+            menu_obj.manual_input, 
+            f"⌨️  Please provide one or several folder path(s) separated with {paths_separator}: ",
+            lower=False
+        )
+        if action is not None:
             return MenuActions.RETURN
         
         # Process folder paths
@@ -354,34 +340,38 @@ def manual_input_loop(menu_obj, input_dict):
         else:
             folder_paths = [user_input]
         
-        valid_folder_paths = [folder_path for folder_path in folder_paths if is_folder(folder_path)]
-        corrupted_folder_paths = [folder_path for folder_path in folder_paths if not is_folder(folder_path)]
+        duplicated_paths = []
+        corrupted_paths = []
+        valid_paths = []
+
+        for folder_path in folder_paths:
+            if is_folder(folder_path):
+                if folder_path not in valid_paths:
+                    valid_paths.append(folder_path)
+                else:
+                    duplicated_paths.append(folder_path)
+            else:
+                corrupted_paths.append(folder_path)
 
         # Notify user about valid entries  
-        count_valid_paths = len(valid_folder_paths)
-        if count_valid_paths == 0:
-            print("\n🔁 Provided folder path(s) are invalid, please try again")
+        if not valid_paths:
+            print("\n⚠️  Provided folder path(s) are invalid, 🔄 restarting")
             continue
-        elif count_valid_paths == 1:
-            print("\n✅ Provided folder path is valid, please proceed with processing depth selection")
-        else:
-            print("\n✅ Provided folder paths are valid, please proceed with processing depth selection")
+        print("\n✅ Provided folder path(s) are valid, please proceed with processing depth selection")
+        # Notify user about duplicated entries
+        if duplicated_paths:
+            print(f"⚠️  Duplicated folder path(s) identified {duplicated_paths} and won't be processed")
         # Notify user about corrupted entries
-        count_corrupted_paths = len(corrupted_folder_paths)
-        if count_corrupted_paths == 0:
-            pass
-        elif count_corrupted_paths == 1:
-            print(f"\n⚠️  Corrupted folder path identified and won't be processed {corrupted_folder_paths}")
-        else:
-            print(f"\n⚠️  Corrupted folder paths identified and won't be processed {corrupted_folder_paths}")
+        if corrupted_paths:
+            print(f"⚠️  Corrupted folder path(s) identified {corrupted_paths} and won't be processed ")
 
         skip_counter = 0
         add_direct_counter = 0
         add_full_counter = 0
         return_back = 0
         
-        for valid_folder_path in valid_folder_paths:
-            in_action = processing_depth_input_loop(menu_obj, valid_folder_path, input_dict)
+        for valid_path in valid_paths:
+            in_action = processing_depth_input_loop(menu_obj, valid_path, input_dict)
             # Loop control parameters check
             match in_action:
                 case MenuActions.RETURN:
@@ -412,32 +402,33 @@ def manual_input_loop(menu_obj, input_dict):
             print(f"✅ {add_full_counter} folder path(s) identified for {ProcessingDepth(1).name} processing")
             return MenuActions.SUCCESS
         elif total_paths_added == 0:
-            print("\n🔁 Valid folder path(s) are missing, please try again")
+            print("\n⚠️  Valid folder path(s) are missing, 🔄 restarting")
 
-# 4th level
+# 3rd level
 def processing_depth_input_loop(menu_obj, folder_path, input_dict):
     
     while True:
         # Request user input
-        try:
-            menu_obj.processing_depth()
-            user_input = input(f"➜  Select your option for {folder_path}: ").strip().lower()
-        except KeyboardInterrupt:
-            print()
+        user_input, action = prompt_user(
+            menu_obj.processing_depth, 
+            f"➜  Select your option for {folder_path}: "
+        )
+        if action is not None:
             return MenuActions.RETURN
         
         # Loop control parameters check
+        
         if user_input == "skip":
             return MenuActions.SKIP
-        elif int(user_input) == 0:
-            input_dict[ProcessingDepth.DIRECT_SUB].append(folder_path)
+        elif user_input == "0":
+            input_dict[int(user_input)].append(folder_path)
             return MenuActions.ADD_DIRECT_SUB
-        elif int(user_input) == 1:
-            input_dict[ProcessingDepth.FULL_HIERARCHY].append(folder_path)
+        elif user_input == "1":
+            input_dict[int(user_input)].append(folder_path)
             return MenuActions.ADD_FULL_HIERARCHY
         else:
-            print("\n🔁 Invalid input provided please try again")
+            print("\n⚠️  Invalid input provided, 🔄 restarting")
 
 if __name__ == "__main__":
     folder_scope = {ProcessingDepth.DIRECT_SUB:[], ProcessingDepth.FULL_HIERARCHY:[]}
-    folder_scope = main_loop(ConsoleMenu, folder_scope)
+    folder_scope = main_loop(Menu, folder_scope)
