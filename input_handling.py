@@ -9,11 +9,10 @@ from typing import List, Tuple, Dict, Optional, Any, Iterable, Iterator, Callabl
 # Glossary
 # Depth = maximum processing radius downward
 
-def print_list_elements(elements: list):
-    for element in elements:
-        print(f"    - {element}")
+# To improve:
+# instead of os.walk(), create recursion based on os.scandir()
 
-
+## String helpers
 def lower_text(text: str) -> str:
     return text.lower()
 
@@ -41,9 +40,7 @@ def parse_text(text: str, separator: Optional[str] = None) -> list[str]:
         return text
     return text.split(separator)
 
-def strip_trailing_sep(path: str) -> str:
-    return strip_text(path, char_to_remove=os.sep)
-
+## Path helpers
 def is_file(path: str) -> bool:
     return os.path.isfile(path)
 
@@ -85,8 +82,9 @@ def get_path_root(path: str) -> str:
 
 def get_depth_from_root(path: str) -> int:
     assert is_folder(path), f"Provided path is not a folder {path}"
-    abs_path = get_abs_path(path)    
-    return get_path_length(strip_trailing_sep(abs_path))
+    abs_path = get_abs_path(path)
+    normalize_path = strip_text(abs_path, char_to_remove=os.sep)
+    return get_path_length(normalize_path)
 
 def get_max_depth_from_path(path: str) -> int:
     assert is_folder(path), f"Provided path is not a folder {path}"
@@ -97,18 +95,17 @@ def get_max_depth_from_path(path: str) -> int:
     )
 
 def get_folders_under(path: str, depth: int, scope_dict) -> dict:
-
+    # counter = 0
     for folder_path, _ , _ in os.walk(path):
-        base_depth = get_depth_from_root(path)
         current_depth = get_depth_from_root(folder_path)
-        print(current_depth, folder_path)
+        # counter += 1
         if current_depth > depth:
             continue
         scope_dict[current_depth].append(folder_path)
-
+    # print(counter)
     return scope_dict
 
-
+## Df helpers
 def open_csv(path: str) -> pd.DataFrame | None:
     try:
         csv_data = pd.read_csv(path)
@@ -119,31 +116,20 @@ def open_csv(path: str) -> pd.DataFrame | None:
         print(f"⚠️  Permission denied: {e}")
     except ParserError as e:
         print(f"⚠️  Parsing error: {e}")
-    return None
-
-def validate_cols(df_cols: list[str], required_cols: list[str]) -> Tuple[bool, list | None]: 
-    df_set = set(df_cols)
-    required_set = set(required_cols)
-    missing_cols = list(required_set - df_set)
-
-    if missing_cols:
-        return True, missing_cols
     
-    return False, None
+    return None
 
 def remove_duplicates(df: pd.DataFrame, column_name: Optional[str] = None) -> pd.DataFrame:
 
     # Check whether column provided
     if column_name is None:
-        df_normalized = df.drop_duplicates(
-            inplace=False
-        )
+        return df
     else:
         df_normalized = df.drop_duplicates(
             column_name, 
             inplace=False
             )
-    return df_normalized  
+    return df_normalized
 
 def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame:
     return df.loc[condition].copy()
@@ -154,9 +140,11 @@ def remove_subfolders(paths: list[str], to_remove: list[str]) -> list[str]:
 
 class MenuActions(StrEnum):
     EXIT = auto()
-    RETURN = auto()
-    SUCCESS = auto()
+    INTERUPT = auto()
     SKIP = auto()
+    SKIP_ALL = auto()
+    SUCCESS = auto()
+    FAILED = auto()
 
 class NotificationLevel(Enum): 
     INFO = "INFO"
@@ -166,16 +154,18 @@ class NotificationLevel(Enum):
     ERROR = "ERROR"
     EXIT = "EXIT"
 
-# Command line interface elements
+# CLI elements
 class Menu:
     RETURN = "↩️  Press 'Ctrl+C' to go back"
+    RELOAD = "↩️  Press 'Ctrl+C' to cancel current input and retry"
+    SKIP = "⌨️  Type 'skip' to skip this folder path"
+    SKIP_ALL = "⌨️  Type 'skipall' to skip all folder paths"
     EXIT = "⌨️  Type 'exit' to suspend the script"
     CSV = "⌨️  Type 'csv' to load folder path(s) from CSV"
     MANUAL = "⌨️  Type 'manual' to provide folder path(s) manually"
     CSV_INPUT = "⌨️  Type 'load' to provide link to CSV file"
     MANUAL_INPUT = "⌨️  Type 'enter' to provide one or several folder path(s)"
-    SKIP = "⌨️  Type 'skip' to skip folder path"
-    DEPTH_RANGE = "⌨️  Provide 'depth' value from the range {depth_range}"
+    DEPTH_RANGE = "⌨️  Type 'depth' value from the range {depth_range}"
 
     @classmethod
     def main(cls):
@@ -200,18 +190,19 @@ class Menu:
 
     @classmethod
     def csv_input(cls):
-        print()
+        print("\n----CSV load menu----")
         print(cls.RETURN)
 
     @classmethod
     def manual_input(cls):
-        print()
+        print("\n----Manual load menu----")
         print(cls.RETURN)
 
     @classmethod
-    def processing_depth(cls, depth_options):
-        print("\n----Processing depth menu----")
-        print(cls.RETURN)
+    def depth_input(cls, depth_options):
+        print("\n----Depth menu----")
+        print(cls.RELOAD)
+        print(cls.SKIP_ALL)
         print(cls.SKIP)
         print(cls.DEPTH_RANGE.format(depth_range=depth_options))
 
@@ -219,7 +210,6 @@ class Prompt:
     MAIN = "⌨️  Select your option: "
     CSV = "⌨️  Please provide link to CSV file: "
     MANUAL = "⌨️  Please provide one or several folder path(s) separated with {paths_separator}: "
-    DEPTH = "➜  Select your option for {path}: "
 
 class Notifier:
     ICONS = {
@@ -293,10 +283,10 @@ def prompt_user(
         return user_input, None
     except KeyboardInterrupt:
         print()
-        return None, MenuActions.RETURN
+        return None, MenuActions.INTERUPT
 
 # CLI execution logic 
-def main_loop(services: AppServices, input_dict): # 1st level
+def main_loop(services: AppServices): # 1st level
     
     input_handler = {
         "csv": csv_input_loop,
@@ -331,27 +321,27 @@ def main_loop(services: AppServices, input_dict): # 1st level
             continue
         
         loop_func = handler
-        in_action = loop_func(services, input_dict)
-        
+        folder_scope, in_action = loop_func(services)
+
         # Loop control parameters check
         match in_action:
-            case MenuActions.RETURN:
+            case MenuActions.INTERUPT:
+                continue
+            case MenuActions.FAILED:
+                notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
                 continue
             case MenuActions.EXIT:
                 notifier_cls.notify(messages_cls.Base.EXIT, NotificationLevel.EXIT)
                 break
             case MenuActions.SUCCESS:
                 notifier_cls.notify(messages_cls.Base.OUTPUT, NotificationLevel.FINISH)
-                break
+                return folder_scope
 
-    return input_dict
-
-def csv_input_loop(services: AppServices, input_dict): # 2nd level
+def csv_input_loop(services: AppServices): # 2nd level
     
     # Required CSV columns for correct input validation
-    required_col1, required_col2 = ("FolderPath", "ProcessingDepth")
-    test_req1, test_req2 = ("FolderPathTest", "ProcessingDepthTest")
-    required_cols = [required_col1, required_col2]
+    required_col1 = "FolderPath"
+    test_req1 = "FolderPathTest"
     menu_cls = services.menu
     notifier_cls = services.notifier
     messages_cls = services.messages
@@ -365,7 +355,7 @@ def csv_input_loop(services: AppServices, input_dict): # 2nd level
             strip_text
         )
         if action is not None:
-            return MenuActions.RETURN
+            return None, MenuActions.INTERUPT
         # Check whether provided link is file, otherwise continue
         if not is_file(user_input):
             notifier_cls.notify(messages_cls.CsvProcessing.FILE_NOT_FOUND_f.format(path=user_input), NotificationLevel.WARNING)
@@ -383,16 +373,14 @@ def csv_input_loop(services: AppServices, input_dict): # 2nd level
             continue
         notifier_cls.notify(messages_cls.CsvProcessing.CSV_LOAD_SUCCEED, NotificationLevel.SUCCESS)
         # Validate CSV columns
-        is_missing_cols, missing_cols = validate_cols({*csv_data}, required_cols)
-        if is_missing_cols:
-            notifier_cls.notify(messages_cls.CsvProcessing.COLUMNS_MISSING_f.format(cols=missing_cols), NotificationLevel.WARNING)
+        if required_col1 not in csv_data.columns:
+            notifier_cls.notify(messages_cls.CsvProcessing.COLUMNS_MISSING_f.format(cols=required_col1), NotificationLevel.WARNING)
             continue
-        notifier_cls.notify(messages_cls.CsvProcessing.COLUMNS_IDENTIFIED_f.format(cols=required_cols), NotificationLevel.SUCCESS)
+        notifier_cls.notify(messages_cls.CsvProcessing.COLUMNS_IDENTIFIED_f.format(cols=required_col1), NotificationLevel.SUCCESS)
         # Validate CSV data
         csv_data[test_req1] = csv_data[required_col1].apply(lambda x: True if is_folder(x) else False)
-        # csv_data[test_req2] = csv_data[required_col2].apply(lambda x: True if x in input_dict else False)
         # Normalize CSV data
-        normalized_csv_data = remove_duplicates(csv_data)
+        normalized_csv_data = remove_duplicates(csv_data, column_name=required_col1)
         duplicates_count = csv_data.shape[0] - normalized_csv_data.shape[0]
         if duplicates_count:
             notifier_cls.notify(messages_cls.CsvProcessing.DUPLICATES_REMOVED_f.format(count=duplicates_count), NotificationLevel.SUCCESS)
@@ -404,106 +392,58 @@ def csv_input_loop(services: AppServices, input_dict): # 2nd level
             continue
         # Define max depth available
         filtered_csv_data["FolderPathDepth"] = filtered_csv_data[required_col1].apply(lambda x: get_depth_from_root(x))
-        filtered_csv_data["MaxDepthFromFolderPath"] = filtered_csv_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
-        print(filtered_csv_data)
-        max_depth = filtered_csv_data["MaxDepthFromFolderPath"].max()
-        folder_scope = {depth: [] for depth in range(0, max_depth + 1)}
+        filtered_csv_data["BranchMaxDepth"] = filtered_csv_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
+        
+        # Define depth and resolve parent-child relationship
+        max_depth = filtered_csv_data["BranchMaxDepth"].max()
+        folder_scope = {depth: [] for depth in range(1, max_depth + 1)}
         folder_depths = sorted(list(set(filtered_csv_data["FolderPathDepth"])))
+        skip_all = False
+        reload = False
         for folder_depth in folder_depths:
             temp_data = filtered_csv_data.loc[filtered_csv_data["FolderPathDepth"] == folder_depth]
             for idx in temp_data.index:
-                folder_path = rstrip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
-                max_depth = temp_data.loc[idx, "MaxDepthFromFolderPath"]
-                depth_options = [depth for depth in range(folder_depth, max_depth)]
-                print(folder_path,  folder_depth)
+                folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
+                max_depth = temp_data.loc[idx, "BranchMaxDepth"]
+                depth_options = [depth for depth in range(folder_depth, max_depth + 1)]
                 if folder_path not in folder_scope[folder_depth]:
-                    action = processing_depth_input_loop(services, folder_path, depth_options, folder_scope)
-                    print(folder_scope)
+                    print(f"\n--> In processing {folder_path}")
+                    action, depth_input = depth_input_loop(services, depth_options)
+                    match action:
+                        case MenuActions.SKIP:
+                            continue
+                        case MenuActions.SKIP_ALL:
+                            skip_all = True
+                            break
+                        case MenuActions.INTERUPT:
+                            reload = True
+                            break
+                        case MenuActions.SUCCESS:
+                            get_folders_under(folder_path, depth_input, folder_scope)
+                            continue
                 else:
-                    print("Hierarchy resolution algorithm is needed")
-
-
-        # Hierarchy levels agreement
-        # for idx, row in filtered_csv_data.iterrows():
-        #     folder_path = row[required_col1]
-        #     # Check folders for defined depth
-        #     # print(get_folders_under(folder_path, filtered_csv_data.loc[idx, "MaxDepthFromFolderPath"]))
-        #     # Incoming depth radius
-        #     depth = row[required_col2]
-        #     start_lvl = get_path_length(folder_path)
-        #     end_lvl = start_lvl + depth
-        #     # Validate parent-child
-        #     ignore = False
-        #     for stored_depth, stored_folder_paths in input_dict.items():
-        #         if not stored_folder_paths:
-        #             continue
-        #         for stored_folder_path in stored_folder_paths:
-        #             # Stored depth radius
-        #             stored_start_lvl = get_path_length(stored_folder_path)
-        #             stored_end_lvl = stored_start_lvl + stored_depth
-        #             same_folder = folder_path == stored_folder_path
-        #             stored_is_parent = is_parent(stored_folder_path, folder_path)
-        #             incoming_is_parent = is_parent(folder_path, stored_folder_path)
-        #             # RULE 1 — exact match
-        #             if same_folder:
-        #                 if end_lvl > stored_end_lvl:
-        #                     input_dict[stored_depth].remove(stored_folder_path)
-        #                     print(f"[RULE 1] {folder_path} scope covers stored {stored_folder_path}")
-        #                 else:
-        #                     print(f"[RULE 1] Stored {stored_folder_path} covers or equal to {folder_path}")
-        #                     ignore = True
-        #                     break
-        #             # RULE 2 — structural relationship
-        #             # Incoming folder is subfolder of stored
-        #             elif stored_is_parent:
-        #                 if stored_end_lvl >= end_lvl:
-        #                     print(f"[RULE 2] Stored {stored_folder_path} scope covers {folder_path}")
-        #                     ignore = True
-        #                     break
-        #                 # handle partial overalp
-        #                 elif stored_end_lvl >= start_lvl:
-        #                     move_to_depth = start_lvl - 1 
-        #                     input_dict[stored_depth].remove(stored_folder_path)
-        #                     input_dict[move_to_depth].append(stored_folder_path)
-        #                     print(f"[RULE 2] Move stored path from depth {stored_depth} to {move_to_depth}")
-        #                 else:
-        #                     print("[RULE 2] No scope overlap both paths should be in scope")
-        #             # Stored folder is subfolder of incoming
-        #             elif incoming_is_parent:
-        #                 if end_lvl >= stored_end_lvl:
-        #                     input_dict[stored_depth].remove(stored_folder_path)
-        #                     print(f"[RULE 2] {folder_path} scope covers stored {stored_folder_path}")
-        #                 elif end_lvl >= stored_start_lvl:
-        #                     # Partial overlap: move incoming folder just above stored
-        #                     add_to_depth = stored_start_lvl - 1
-        #                     input_dict[add_to_depth].append(folder_path)
-        #                     print(f"[RULE 2] Add incoming path to {add_to_depth} instead of {depth}")
-        #                 else:
-        #                     print("[RULE 2] No scope overlap both paths should be in scope")
-                
-        #         if ignore:
-        #             break
+                    print(f"\n--> In processing {folder_path}")
+                    print(f"Skiped as already in scope. Hierarchy resolution step required")
             
-        #     if not ignore:
-        #         input_dict[depth].append(folder_path)
+            if skip_all or reload:
+                break
+        if reload:
+            continue
 
         total_paths_added = 0
-        for depth in input_dict:
-            # Check if dict value is not empty and provide notification
-            if input_dict[depth]:
-                path_count = len(input_dict[depth])
-                total_paths_added += path_count
-                notifier_cls.notify(messages_cls.CsvProcessing.FOLDER_PATHS_IDENTIFIED_ff.format(count=path_count, key=Depth(depth).name), NotificationLevel.SUCCESS)
-        # Loop control parameters check
-        if total_paths_added > 0:
-            return MenuActions.SUCCESS
-        else:
-            notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
+        for depth in folder_scope:
+            total_paths_added += len(folder_scope[depth])
+        
+        if total_paths_added == 0:
+            return folder_scope, MenuActions.FAILED
+        
+        return folder_scope, MenuActions.SUCCESS
 
-def manual_input_loop(services: AppServices, input_dict): # 2nd level
+def manual_input_loop(services: AppServices): # 2nd level
     
     # Separator to parse user input
     paths_separator = ","
+    required_col1 = "FolderPath"
     menu_cls = services.menu
     notifier_cls = services.notifier
     messages_cls = services.messages
@@ -512,12 +452,12 @@ def manual_input_loop(services: AppServices, input_dict): # 2nd level
     while True:
         # Request user input
         user_input, action = prompt_user(
-            menu_cls.manual_input, 
+            menu_cls.manual_input(), 
             prompt_cls.MANUAL,
             strip_text
         )
         if action is not None:
-            return MenuActions.RETURN  
+            return None, MenuActions.RETURN
         
         # Parse user input
         folder_paths = parse_text(user_input, paths_separator)
@@ -548,42 +488,48 @@ def manual_input_loop(services: AppServices, input_dict): # 2nd level
         if corrupted_paths:
             notifier_cls.notify(messages_cls.ManualProcessing.CORRUPTED_PATHS_f.format(paths=corrupted_paths), NotificationLevel.WARNING)
 
-        skip_counter = 0
-        return_back = False
-        for valid_path in valid_paths:
-            in_action = processing_depth_input_loop(services, valid_path, input_dict)
-            match in_action:
-                case MenuActions.SUCCESS:
-                    continue
-                case MenuActions.RETURN:
-                    notifier_cls.notify(messages_cls.ManualProcessing.INPUT_RESET, NotificationLevel.INFO)
-                    for depth in Depth:
-                        input_dict[depth] = []
-                    skip_counter = 0
-                    return_back = True
-                    break
-                case MenuActions.SKIP:
-                    skip_counter += 1
+        path_data = pd.DataFrame()
+        path_data[required_col1] = valid_paths
+        path_data["FolderPathDepth"] = path_data[required_col1].apply(lambda x: get_depth_from_root(x))
+        path_data["BranchMaxDepth"] = path_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
+
+        # Define depth and resolve parent-child relationship
+        max_depth = path_data["BranchMaxDepth"].max()
+        folder_scope = {depth: [] for depth in range(1, max_depth + 1)}
+        folder_depths = sorted(list(set(path_data["FolderPathDepth"])))
+        return_back = False 
+        for folder_depth in folder_depths:
+            if return_back:
+                break
+            temp_data = path_data.loc[path_data["FolderPathDepth"] == folder_depth]
+            for idx in temp_data.index:
+                folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
+                max_depth = temp_data.loc[idx, "BranchMaxDepth"]
+                depth_options = [depth for depth in range(folder_depth, max_depth + 1)]
+                if folder_path not in folder_scope[folder_depth]:
+                    print(f"\n--> In processing {folder_path}")
+                    action, depth_input = depth_input_loop(services, depth_options)
+                    match action:
+                        case MenuActions.SKIP:
+                            continue
+                        case MenuActions.SUCCESS:
+                            get_folders_under(folder_path, depth_input, folder_scope)
+                            continue
+                        case MenuActions.RETURN:
+                            folder_scope = {depth: [] for depth in range(1, max_depth + 1)}
+                            return_back = True
+                            notifier_cls.notify(messages_cls.ManualProcessing.INPUT_RESET, NotificationLevel.INFO)
+                            break
+                else:
+                    print(f"\n--> In processing {folder_path}")
+                    print(f"Skiped as already in scope. Hierarchy resolution step required")
 
         if return_back:
             continue
         
-        # Count added folder paths
-        total_paths_added = 0
-        for depth in Depth:
-            # Check if dict value is not empty and provide notification
-            if input_dict[depth]:
-                path_count = len(input_dict[depth])
-                total_paths_added += path_count
-                notifier_cls.notify(messages_cls.ManualProcessing.FOLDER_PATHS_IDENTIFIED_ff.format(count=path_count, key=Depth(depth).name), NotificationLevel.SUCCESS)
+        return folder_scope, MenuActions.SUCCESS
 
-        # Loop control parameters check
-        if total_paths_added > 0:
-            return MenuActions.SUCCESS
-        else:
-            notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
-
-def processing_depth_input_loop(services: AppServices, folder_path, depth_options, folder_scope): # 3rd level
+def depth_input_loop(services: AppServices, depth_options): # 3rd level
     
     menu_cls = services.menu
     notifier_cls = services.notifier
@@ -592,32 +538,29 @@ def processing_depth_input_loop(services: AppServices, folder_path, depth_option
 
     while True:
         # Request user input
-        user_input, action = prompt_user(
-            menu_cls.processing_depth(depth_options),
-            prompt_cls.DEPTH.format(path=folder_path),
+        depth_input, action = prompt_user(
+            menu_cls.depth_input(depth_options),
+            prompt_cls.MAIN,
             strip_text,
             lower_text
         )
         if action is not None:
-            return MenuActions.RETURN
+            return MenuActions.INTERUPT, None
 
-        if user_input == "skip":
-            return MenuActions.SKIP
+        if depth_input == "skip":
+            return MenuActions.SKIP, None
+        elif depth_input == "skipall":
+            return MenuActions.SKIP_ALL, None
 
         try:
-            user_input = int(user_input)
-            if user_input in depth_options:
-                print(f"User selected {user_input} for {folder_path}")
-                get_folders_under(folder_path, user_input, folder_scope)
-                # notifier_cls.notify(messages_cls.ManualProcessing.ADD_FOLDER_PATH_ff.format(path=folder_path, key=depth.name), NotificationLevel.SUCCESS)
-                return MenuActions.SUCCESS
+            depth_input = int(depth_input)
+            if depth_input in depth_options:
+                return MenuActions.SUCCESS, depth_input
             else:
                 notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
         except ValueError:
             notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
 
 if __name__ == "__main__":
-    paths_by_depth = {}
     app_services = AppServices(Menu, Prompt, Messages, Notifier)
-    paths_by_depth = main_loop(app_services, paths_by_depth)
-    print(paths_by_depth)
+    paths_by_depth = main_loop(app_services)
