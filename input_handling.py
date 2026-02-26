@@ -16,26 +16,16 @@ from typing import List, Tuple, Dict, Optional, Any, Iterable, Iterator, Callabl
 def lower_text(text: str) -> str:
     return text.lower()
 
-def strip_text(text: str, char_to_remove: str = None) -> str:
+def strip_text(text: str, char_to_remove: Optional[str] = None) -> str:
     return text.strip(char_to_remove) 
 
-def lstrip_text(text: str, char_to_remove: str = None) -> str:
+def lstrip_text(text: str, char_to_remove: Optional[str] = None) -> str:
     return text.lstrip(char_to_remove) 
 
-def rstrip_text(text: str, char_to_remove: str = None) -> str:
+def rstrip_text(text: str, char_to_remove: Optional[str] = None) -> str:
     return text.rstrip(char_to_remove) 
 
-def split_text(text: str, separator: str = None) -> str:
-    if separator is None:
-        return text
-    return text.split(separator)
-
-def transform_text(text: str, *funcs: Callable[[str], str]) -> str:
-    for func in funcs:
-        text = func(text)
-    return text
-
-def parse_text(text: str, separator: Optional[str] = None) -> list[str]:
+def split_text(text: str, separator: Optional[str] = None) -> str:
     if separator is None:
         return text
     return text.split(separator)
@@ -62,7 +52,7 @@ def get_common_path(paths: Iterable[str]) -> str:
     return os.path.commonpath(paths)
 
 def get_path_length(path: str, path_separator: str = os.sep) -> int:
-    path_elements = parse_text(path, path_separator)
+    path_elements = split_text(path, path_separator)
     path_length = len(path_elements)
     return path_length
 
@@ -136,7 +126,6 @@ def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame:
 
 def remove_subfolders(paths: list[str], to_remove: list[str]) -> list[str]:
     return list(set(paths) - set(to_remove))
-
 
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -271,16 +260,11 @@ class AppServices:
     notifier: Notifier
 
 # CLI helper functions
-def prompt_user(
-        menu: Callable[[], None],
-        prompt_text: str,
-        *transform_funcs:Callable[[str], str],
-)-> Tuple[str | None, MenuActions | None]:
+def prompt_user(menu: str, prompt_text: str) -> Tuple[str | MenuActions, None | MenuActions]:
     try:
         menu
         user_input = input(prompt_text)
-        user_input = transform_text(user_input, *transform_funcs)
-        return user_input, None
+        return user_input, MenuActions.SUCCESS
     except KeyboardInterrupt:
         print()
         return None, MenuActions.INTERUPT
@@ -292,6 +276,7 @@ def main_loop(services: AppServices): # 1st level
         "csv": csv_input_loop,
         "manual": manual_input_loop,
     }
+
     menu_cls = services.menu
     notifier_cls = services.notifier
     messages_cls = services.messages
@@ -302,12 +287,13 @@ def main_loop(services: AppServices): # 1st level
         user_input, action = prompt_user(
             menu_cls.main(), 
             prompt_cls.MAIN,
-            strip_text,
-            lower_text
         )
-        if action is not None:
-            print("\n⚠️  Type 'exit' to terminate the script")
-            continue
+        match action:
+            case MenuActions.SUCCESS:
+                user_input = lower_text(strip_text(user_input))
+            case MenuActions.INTERUPT:
+                print("\n⚠️  Type 'exit' to terminate the script")
+                continue
 
         #  User input handling
         if user_input == 'exit':
@@ -330,9 +316,6 @@ def main_loop(services: AppServices): # 1st level
             case MenuActions.FAILED:
                 notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
                 continue
-            case MenuActions.EXIT:
-                notifier_cls.notify(messages_cls.Base.EXIT, NotificationLevel.EXIT)
-                break
             case MenuActions.SUCCESS:
                 notifier_cls.notify(messages_cls.Base.OUTPUT, NotificationLevel.FINISH)
                 return folder_scope
@@ -352,17 +335,20 @@ def csv_input_loop(services: AppServices): # 2nd level
         user_input, action = prompt_user(
             menu_cls.csv_input(), 
             prompt_cls.CSV,
-            strip_text
         )
-        if action is not None:
-            return None, MenuActions.INTERUPT
+        match action:
+            case MenuActions.SUCCESS:
+                user_input = strip_text(user_input)
+            case MenuActions.INTERUPT:
+                return None, MenuActions.INTERUPT
+        
         # Check whether provided link is file, otherwise continue
         if not is_file(user_input):
             notifier_cls.notify(messages_cls.CsvProcessing.FILE_NOT_FOUND_f.format(path=user_input), NotificationLevel.WARNING)
             continue    
         # Check whether file extension == 'csv', otherwise continue
         file_ext = get_file_extension(user_input)
-        file_ext = transform_text(file_ext, strip_text, lower_text)
+        file_ext = lower_text(strip_text(file_ext))
         if file_ext != '.csv':
             notifier_cls.notify(messages_cls.CsvProcessing.EXTENSION_NOT_SUPPORTED_f.format(ext=file_ext), NotificationLevel.WARNING)
             continue
@@ -408,8 +394,8 @@ def csv_input_loop(services: AppServices): # 2nd level
                 depth_options = [depth for depth in range(folder_depth, max_depth + 1)]
                 if folder_path not in folder_scope[folder_depth]:
                     print(f"\n--> In processing {folder_path}")
-                    action, depth_input = depth_input_loop(services, depth_options)
-                    match action:
+                    depth_input, in_action = depth_input_loop(services, depth_options)
+                    match in_action:
                         case MenuActions.SKIP:
                             continue
                         case MenuActions.SKIP_ALL:
@@ -454,13 +440,15 @@ def manual_input_loop(services: AppServices): # 2nd level
         user_input, action = prompt_user(
             menu_cls.manual_input(), 
             prompt_cls.MANUAL,
-            strip_text
         )
-        if action is not None:
-            return None, MenuActions.RETURN
+        match action:
+            case MenuActions.SUCCESS:
+                user_input = strip_text(user_input)
+            case MenuActions.INTERUPT:
+                return None, MenuActions.INTERUPT
         
         # Parse user input
-        folder_paths = parse_text(user_input, paths_separator)
+        folder_paths = split_text(user_input, paths_separator)
         
         # Process folder path(s)
         duplicated_paths = []
@@ -541,23 +529,25 @@ def depth_input_loop(services: AppServices, depth_options): # 3rd level
         depth_input, action = prompt_user(
             menu_cls.depth_input(depth_options),
             prompt_cls.MAIN,
-            strip_text,
-            lower_text
         )
-        if action is not None:
-            return MenuActions.INTERUPT, None
+        match action:
+            case MenuActions.SUCCESS:
+                depth_input = lower_text(strip_text(depth_input))
+            case MenuActions.INTERUPT:
+                return None, MenuActions.INTERUPT
 
         if depth_input == "skip":
-            return MenuActions.SKIP, None
+            return None, MenuActions.SKIP
         elif depth_input == "skipall":
-            return MenuActions.SKIP_ALL, None
+            return None, MenuActions.SKIP_ALL
 
         try:
             depth_input = int(depth_input)
             if depth_input in depth_options:
-                return MenuActions.SUCCESS, depth_input
+                return depth_input, MenuActions.SUCCESS
             else:
                 notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
+                continue
         except ValueError:
             notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
 
