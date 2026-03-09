@@ -1,10 +1,9 @@
-from dataclasses import dataclass, field
-from enum import Enum, IntEnum, StrEnum, auto
-from itertools import combinations, product
+from enum import StrEnum, auto
 import os
 import pandas as pd
 from pandas.errors import ParserError
-from typing import List, Tuple, Dict, Optional, Any, Iterable, Iterator, Callable
+from string import Formatter
+from typing import Tuple, Optional, Iterable
 
 # Glossary
 # Depth = maximum processing radius downward
@@ -96,18 +95,11 @@ def get_folders_under(path: str, depth: int, scope_dict) -> dict:
     return scope_dict
 
 ## Df helpers
-def open_csv(path: str) -> pd.DataFrame | None:
+def open_csv(path: str) -> Tuple[pd.DataFrame | None, None | Exception]:
     try:
-        csv_data = pd.read_csv(path)
-        return csv_data
-    except FileNotFoundError as e:
-        print(f"⚠️  File not found: {e}")
-    except PermissionError as e:
-        print(f"⚠️  Permission denied: {e}")
-    except ParserError as e:
-        print(f"⚠️  Parsing error: {e}")
-    
-    return None
+        return pd.read_csv(path), None
+    except (FileNotFoundError, PermissionError, ParserError) as e:
+        return None, e
 
 def remove_duplicates(df: pd.DataFrame, column_name: Optional[str] = None) -> pd.DataFrame:
 
@@ -127,6 +119,14 @@ def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame:
 def remove_subfolders(paths: list[str], to_remove: list[str]) -> list[str]:
     return list(set(paths) - set(to_remove))
 
+def get_template_vars(template: str):
+    return{
+        field_name
+        for _, field_name, _, _, in Formatter().parse(template)
+        if field_name
+    }
+
+# CLI elements
 class MenuActions(StrEnum):
     EXIT = auto()
     INTERUPT = auto()
@@ -135,246 +135,229 @@ class MenuActions(StrEnum):
     SUCCESS = auto()
     FAILED = auto()
 
-class NotificationLevel(Enum): 
-    INFO = "INFO"
-    SUCCESS = "SUCCESS"
-    FINISH = "FINISH"
-    WARNING = "WARNING"
-    ERROR = "ERROR"
-    EXIT = "EXIT"
-
-# CLI elements
-class Menu:
-    RETURN = "↩️  Press 'Ctrl+C' to go back"
-    RELOAD = "↩️  Press 'Ctrl+C' to cancel current input and retry"
-    SKIP = "⌨️  Type 'skip' to skip this folder path"
-    SKIP_ALL = "⌨️  Type 'skipall' to skip all folder paths"
-    EXIT = "⌨️  Type 'exit' to suspend the script"
-    CSV = "⌨️  Type 'csv' to load folder path(s) from CSV"
-    MANUAL = "⌨️  Type 'manual' to provide folder path(s) manually"
-    CSV_INPUT = "⌨️  Type 'load' to provide link to CSV file"
-    MANUAL_INPUT = "⌨️  Type 'enter' to provide one or several folder path(s)"
-    DEPTH_RANGE = "⌨️  Type 'depth' value from the range {depth_range}"
-
-    @classmethod
-    def main(cls):
-        print("\n----Main menu----")
-        print(cls.EXIT)
-        print(cls.CSV)
-        print(cls.MANUAL)
-
-    @classmethod
-    def csv(cls):
-        print("\n----CSV menu----")
-        print(cls.EXIT)
-        print(cls.RETURN)
-        print(cls.CSV_INPUT)
-
-    @classmethod
-    def manual(cls):
-        print("\n----Manual menu----")
-        print(cls.EXIT)
-        print(cls.RETURN)
-        print(cls.MANUAL_INPUT)
-
-    @classmethod
-    def csv_input(cls):
-        print("\n----CSV load menu----")
-        print(cls.RETURN)
-
-    @classmethod
-    def manual_input(cls):
-        print("\n----Manual load menu----")
-        print(cls.RETURN)
-
-    @classmethod
-    def depth_input(cls, depth_options):
-        print("\n----Depth menu----")
-        print(cls.RELOAD)
-        print(cls.SKIP_ALL)
-        print(cls.SKIP)
-        print(cls.DEPTH_RANGE.format(depth_range=depth_options))
-
-class Prompt:
-    MAIN = "⌨️  Select your option: "
-    CSV = "⌨️  Please provide link to CSV file: "
-    MANUAL = "⌨️  Please provide one or several folder path(s) separated with {paths_separator}: "
-
-class Notifier:
-    ICONS = {
-        NotificationLevel.INFO: "ℹ️ ",
-        NotificationLevel.SUCCESS: "✅",
-        NotificationLevel.FINISH: "➡️ ",
-        NotificationLevel.WARNING: "⚠️ ",
-        NotificationLevel.EXIT: "🛑",
-        NotificationLevel.ERROR: "❌",
+cli_assets = {
+    "icons": {
+        "empty": '🚫',
+        "keyboard":'⌨️',
+        "check_mark": '✅',
+        "cross_mark": '❌',
+        "stop_sign": '🛑',
+        "warning_sign": '⚠️',
+        "right_arrow": '➡️',
+        "leftwards_arrow_with_hook": '↩️',
+        "restart": '🔄',
+        "information":'ℹ️',
+        "bullseye": '🎯'
+    },
+    "separators": {
+        "space": " ",
+        "dash": "-"
+    },
+    "templates": {
+        "header": "{new_line}{separator}{text}{separator}",
+        "menu_line": "{icon}{separator}{text}",
+        "prompt": "{icon}{separator}{text}",
+        "notification": "{icon}{separator}{text}",
     }
-    @staticmethod
-    def notify(msg: str, level: NotificationLevel = NotificationLevel.INFO):
-        icon = Notifier.ICONS.get(level, "")
-        print(f"{icon} {msg}")
+}
 
-class Messages:
-    
-    class Base:
-        EXIT = "Script terminated"
-        INVALID_INPUT = "Invalid input"
-        EMPTY_INPUT = "No folder path(s) to process"
-        OUTPUT = "Output ready"
+cli_elements = {
+    "headers": {
+        "defaults": {"template": "header", "new_line": "\n" , "separator": ("dash", 5), "text": "default"},
+        "main": {"text": "Main"},
+        "csv_load": {"text": "CSV load"},
+        "manual_load": {"text": "Manual load"},
+        "depth": {"text": "Depth"}
+    },
+    "menu_lines": {
+        "defaults": {"template": "menu_line", "icon":"empty", "separator": ("space", 2), "text": "default"},
+        "exit": {"icon":"cross_mark", "separator": ("space", 1), "text": "Press 'Ctrl+C' to suspend the script"},
+        "return_back": {"icon":"leftwards_arrow_with_hook", "text": "Press 'Ctrl+C' to go back"},
+        "restart": {"icon":"restart",  "separator": ("space", 1), "text": "Press 'Ctrl+C' to cancel current input and retry"},
+        "skip": {"icon":"keyboard", "text": "Type 'skip' to skip folder path"},
+        "skip_all": {"icon":"keyboard", "text": "Type 'skipall' to skip all folder path(s)"},
+        "csv_load": {"icon":"keyboard", "text": "Type 'csv' to load folder path(s) from CSV"},
+        "manual_load": {"icon":"keyboard","text": "Type 'manual' to provide folder path(s) directly in CLI"}
+    },
+    "prompts": {
+        "defaults": {"template": "prompt", "icon":"right_arrow", "separator": ("space", 2), "text": "Provide your option: "},
+        "csv": {"text": "Provide link to CSV file: "},
+        "manual": {"text": "Provide one or several folder path(s) separated with {paths_separator}: "},
+        "depth": {"text": "Provide 'depth' value from the range {depth_range}: "}
+    },
+    "warnings": {
+        "defaults": {"template": "notification", "icon": "warning_sign", "separator": ("space", 2), "text": "default"},
+        "invalid_input": {"text": "Invalid input"}, # General
+        "empty_input": {"text": "No folder path(s) to process"}, # General
+        "csv_load_failed": {"text": "CSV loading failed with {error}"}, # CSV
+        "file_not_found": {"text": "Provided path '{path}' is not a file"}, # File / Extension
+        "extension_not_supported": {"text": "Provided extension '{ext}' is not supported"}, # File / Extension
+        "missing_columns": {"text": "Required columns {cols} are missing"}, # Columns
+    },
+    "infos": {
+        "defaults": {"template": "notification", "icon": "information", "separator": ("space", 2), "text": "default"},
+        "exit": {"text": "Script terminated"}, # General
+        "output_ready": {"text": "Output ready"}, # General
+        "valid_paths": {"text": "Valid folder path(s) identified {paths}"}, # Folder paths
+        "duplicated_removed": {"text": "{count} duplicate path(s) removed"}, # Folder paths
+        "corrupted_removed": {"text": "{count} corrupted path(s) removed"}, # Folder paths
+        "hierarchy_clash": {"text": "Skipped as already in scope. Hierarchy resolution step required"}, # Folder paths
+    }
+}
 
-        @staticmethod
-        def format(msg: str, **kwargs):
-            return msg.format(**kwargs)
+menus = {
+    "main_menu": [
+        ("headers", "main"),
+        ("menu_lines", "exit"),
+        ("menu_lines", "csv_load"),
+        ("menu_lines", "manual_load")
+    ],
+    "csv_menu": [
+        ("headers", "csv_load"), 
+        ("menu_lines", "return_back")
+    ],
+    "manual_menu": [
+        ("headers", "manual_load"), 
+        ("menu_lines", "return_back")
+    ],
+    "depth_menu": [
+        ("headers", "depth"), 
+        ("menu_lines", "restart"), 
+        ("menu_lines", "skip"), 
+        ("menu_lines", "skip_all")
+    ]
+}
 
-    class CsvProcessing(Base):
-        # Regular string
-        CSV_LOAD_FAILED = "CSV loading failed"
-        CSV_LOAD_SUCCEED = "CSV opened"
-        FOLDER_PATHS_FILTERED = "Valid folder path(s) filtered"
-        # f string with 1 variable
-        FILE_NOT_FOUND_f = "Provided path '{path}' is not a file"
-        EXTENSION_NOT_SUPPORTED_f = "Provided extension '{ext}' is not supported"
-        COLUMNS_MISSING_f = "Required columns {cols} are missing"
-        COLUMNS_IDENTIFIED_f = "Required columns {cols} identified"
-        DUPLICATES_REMOVED_f = "{count} duplicate path(s) removed"
-        # f string with 2 variables
-        FOLDER_PATHS_IDENTIFIED_ff = "{count} folder path(s) identified for {key} processing"
+# CLI execution logic
+def render_cli_element(config: dict, context: str, cli_assets: dict) -> str:
+    # unpack assets
+    icons = cli_assets["icons"]
+    separators = cli_assets["separators"]
+    templates = cli_assets["templates"]
+    # context is a key in dict, so we need to check if it available in provided config
+    assert isinstance(config, dict), f"config should be a dictionary, {type(config)} provided instead"
+    assert context in config, f"{context} is not found in config"
+    # i need to understand the template that needs to be populated
+    defaults = config.get("defaults", {})
+    assert "template" in defaults, f"Template should be defined in defaults"
+    template_name = defaults.get("template")
+    template = templates[template_name]
+    template_vars = get_template_vars(template)
+    default_config = {k : defaults.get(k, None) for k in template_vars if defaults.get(k, None) is not None}
+    # unpack specific context configurations
+    context_config = {k : config[context].get(k, None) for k in template_vars if config[context].get(k, None) is not None} 
+    # Update default config with context specific values
+    default_config.update(context_config)
+    if "icon" in default_config:
+        default_config["icon"] = icons[default_config["icon"]]
+    if "separator" in default_config:
+        separator = separators[default_config["separator"][0]]
+        separator_len = default_config["separator"][1]
+        default_config["separator"] = separator * separator_len
+    ui_element = template.format(**default_config)
+    return ui_element
 
-    class ManualProcessing(Base):
-        # Regular string
-        INPUT_RESET = "Input dictionary reset"
-        # f string with 1 variable
-        PATHS_VALID_f = "Valid folder path(s) identified {paths}"
-        DUPLICATED_PATHS_f = "Duplicated folder path(s) identified {paths} and won't be processed"
-        CORRUPTED_PATHS_f = "Corrupted folder path(s) identified {paths} and won't be processed"
-        # f string with 2 variables
-        ADD_FOLDER_PATH_ff = "{path} folder path added to {key}"
-        FOLDER_PATHS_IDENTIFIED_ff = "{count} folder path(s) identified for {key} processing"
-
-# CLI application services 
-@dataclass
-class AppServices:
-    menu: Menu
-    prompt: Prompt
-    messages: Messages
-    notifier: Notifier
-
-# CLI helper functions
-def prompt_user(menu: str, prompt_text: str) -> Tuple[str | MenuActions, None | MenuActions]:
+def prompt_user(prompt: str)-> Tuple[str | None, MenuActions | None]:
     try:
-        menu
-        user_input = input(prompt_text)
+        user_input = input(prompt)
         return user_input, MenuActions.SUCCESS
     except KeyboardInterrupt:
-        print()
         return None, MenuActions.INTERUPT
 
-# CLI execution logic 
-def main_loop(services: AppServices): # 1st level
+def main_loop(menus, cli_elements, cli_assets): # 1st level
     
     input_handler = {
-        "csv": csv_input_loop,
-        "manual": manual_input_loop,
+        "csv": csv_loop,
+        "manual": manual_loop,
     }
-
-    menu_cls = services.menu
-    notifier_cls = services.notifier
-    messages_cls = services.messages
-    prompt_cls = services.prompt
 
     while True:
         # Request user input
-        user_input, action = prompt_user(
-            menu_cls.main(), 
-            prompt_cls.MAIN,
-        )
+        main_menu = menus["main_menu"]
+        for menu_line in main_menu:
+            config_name, context = menu_line
+            print(render_cli_element(cli_elements[config_name], context, cli_assets))
+        user_input, action = prompt_user(render_cli_element(cli_elements["prompts"], "defaults", cli_assets))
         match action:
             case MenuActions.SUCCESS:
                 user_input = lower_text(strip_text(user_input))
             case MenuActions.INTERUPT:
-                print("\n⚠️  Type 'exit' to terminate the script")
-                continue
+                print()
+                print(render_cli_element(cli_elements["infos"], "exit", cli_assets))
+                break
 
         #  User input handling
-        if user_input == 'exit':
-            notifier_cls.notify(messages_cls.Base.EXIT, NotificationLevel.EXIT)
-            break
-
         handler = input_handler.get(user_input)
 
         if not handler:
-            notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["warnings"], "invalid_input", cli_assets))
             continue
         
         loop_func = handler
-        folder_scope, in_action = loop_func(services)
+        folder_scope, in_action = loop_func(menus, cli_elements, cli_assets)
 
         # Loop control parameters check
         match in_action:
             case MenuActions.INTERUPT:
                 continue
             case MenuActions.FAILED:
-                notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
+                print(render_cli_element(cli_elements["warnings"], "empty_input", cli_assets))
                 continue
             case MenuActions.SUCCESS:
-                notifier_cls.notify(messages_cls.Base.OUTPUT, NotificationLevel.FINISH)
+                print(render_cli_element(cli_elements["infos"], "output_ready", cli_assets))
                 return folder_scope
 
-def csv_input_loop(services: AppServices): # 2nd level
+def csv_loop(menus, cli_elements, cli_assets): # 2nd level
     
     # Required CSV columns for correct input validation
     required_col1 = "FolderPath"
     test_req1 = "FolderPathTest"
-    menu_cls = services.menu
-    notifier_cls = services.notifier
-    messages_cls = services.messages
-    prompt_cls = services.prompt
     
     while True:
         # Request user input
-        user_input, action = prompt_user(
-            menu_cls.csv_input(), 
-            prompt_cls.CSV,
-        )
+        csv_menu = menus["csv_menu"]
+        for menu_line in csv_menu:
+            config_name, context = menu_line
+            print(render_cli_element(cli_elements[config_name], context, cli_assets))
+        user_input, action = prompt_user(render_cli_element(cli_elements["prompts"], "csv", cli_assets))
         match action:
             case MenuActions.SUCCESS:
                 user_input = strip_text(user_input)
             case MenuActions.INTERUPT:
+                print()
                 return None, MenuActions.INTERUPT
         
         # Check whether provided link is file, otherwise continue
         if not is_file(user_input):
-            notifier_cls.notify(messages_cls.CsvProcessing.FILE_NOT_FOUND_f.format(path=user_input), NotificationLevel.WARNING)
-            continue    
+            print(render_cli_element(cli_elements["warnings"], "file_not_found", cli_assets).format(path=user_input))
+            continue
         # Check whether file extension == 'csv', otherwise continue
         file_ext = get_file_extension(user_input)
         file_ext = lower_text(strip_text(file_ext))
         if file_ext != '.csv':
-            notifier_cls.notify(messages_cls.CsvProcessing.EXTENSION_NOT_SUPPORTED_f.format(ext=file_ext), NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["warnings"], "extension_not_supported", cli_assets).format(ext=file_ext))
             continue
         # Open CSV file as dataframe
-        csv_data = open_csv(user_input)
-        if csv_data is None:
-            notifier_cls.notify(messages_cls.CsvProcessing.CSV_LOAD_FAILED, NotificationLevel.WARNING)
+        csv_data, error = open_csv(user_input)
+        if error:
+            print(render_cli_element(cli_elements["warnings"], "csv_load_failed", cli_assets).format(ext=file_ext))
             continue
-        notifier_cls.notify(messages_cls.CsvProcessing.CSV_LOAD_SUCCEED, NotificationLevel.SUCCESS)
         # Validate CSV columns
         if required_col1 not in csv_data.columns:
-            notifier_cls.notify(messages_cls.CsvProcessing.COLUMNS_MISSING_f.format(cols=required_col1), NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["warnings"], "missing_columns", cli_assets).format(cols=required_col1))
             continue
-        notifier_cls.notify(messages_cls.CsvProcessing.COLUMNS_IDENTIFIED_f.format(cols=required_col1), NotificationLevel.SUCCESS)
         # Validate CSV data
         csv_data[test_req1] = csv_data[required_col1].apply(lambda x: True if is_folder(x) else False)
         # Normalize CSV data
         normalized_csv_data = remove_duplicates(csv_data, column_name=required_col1)
         duplicates_count = csv_data.shape[0] - normalized_csv_data.shape[0]
         if duplicates_count:
-            notifier_cls.notify(messages_cls.CsvProcessing.DUPLICATES_REMOVED_f.format(count=duplicates_count), NotificationLevel.SUCCESS)
+            print(render_cli_element(cli_elements["infos"], "duplicated_removed", cli_assets).format(count=duplicates_count))
         # Select valid entries
         condition = normalized_csv_data[test_req1] == True
         filtered_csv_data = filter_df(normalized_csv_data, condition)
         if filtered_csv_data.empty:
-            notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["warnings"], "empty_input", cli_assets))
             continue
         # Define max depth available
         filtered_csv_data["FolderPathDepth"] = filtered_csv_data[required_col1].apply(lambda x: get_depth_from_root(x))
@@ -394,7 +377,7 @@ def csv_input_loop(services: AppServices): # 2nd level
                 depth_options = [depth for depth in range(folder_depth, max_depth + 1)]
                 if folder_path not in folder_scope[folder_depth]:
                     print(f"\n--> In processing {folder_path}")
-                    depth_input, in_action = depth_input_loop(services, depth_options)
+                    depth_input, in_action = depth_loop(menus, depth_options)
                     match in_action:
                         case MenuActions.SKIP:
                             continue
@@ -409,7 +392,7 @@ def csv_input_loop(services: AppServices): # 2nd level
                             continue
                 else:
                     print(f"\n--> In processing {folder_path}")
-                    print(f"Skiped as already in scope. Hierarchy resolution step required")
+                    print(render_cli_element(cli_elements["infos"], "hierarchy_clash", cli_assets))
             
             if skip_all or reload:
                 break
@@ -425,30 +408,28 @@ def csv_input_loop(services: AppServices): # 2nd level
         
         return folder_scope, MenuActions.SUCCESS
 
-def manual_input_loop(services: AppServices): # 2nd level
+def manual_loop(menus, cli_elements, cli_assets): # 2nd level
     
     # Separator to parse user input
-    paths_separator = ","
+    separator = ","
     required_col1 = "FolderPath"
-    menu_cls = services.menu
-    notifier_cls = services.notifier
-    messages_cls = services.messages
-    prompt_cls = services.prompt
 
     while True:
         # Request user input
-        user_input, action = prompt_user(
-            menu_cls.manual_input(), 
-            prompt_cls.MANUAL,
-        )
+        manual_menu = menus["manual_menu"]
+        for menu_line in manual_menu:
+            config_name, context = menu_line
+            print(render_cli_element(cli_elements[config_name], context, cli_assets))
+        user_input, action = prompt_user(render_cli_element(cli_elements["prompts"], "manual", cli_assets).format(paths_separator=separator))
         match action:
             case MenuActions.SUCCESS:
                 user_input = strip_text(user_input)
             case MenuActions.INTERUPT:
+                print()
                 return None, MenuActions.INTERUPT
         
         # Parse user input
-        folder_paths = split_text(user_input, paths_separator)
+        folder_paths = split_text(user_input, separator)
         
         # Process folder path(s)
         duplicated_paths = []
@@ -466,15 +447,15 @@ def manual_input_loop(services: AppServices): # 2nd level
 
         # Notify user about valid entries
         if not valid_paths:
-            notifier_cls.notify(messages_cls.Base.EMPTY_INPUT, NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["warnings"], "empty_input", cli_assets))
             continue
-        notifier_cls.notify(messages_cls.ManualProcessing.PATHS_VALID_f.format(paths=valid_paths), NotificationLevel.SUCCESS)
+        print(render_cli_element(cli_elements["infos"], "valid_paths", cli_assets).format(count=len(valid_paths)))
         # Notify user about duplicated entries
         if duplicated_paths:
-            notifier_cls.notify(messages_cls.ManualProcessing.DUPLICATED_PATHS_f.format(paths=duplicated_paths), NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["infos"], "duplicated_removed", cli_assets).format(count=len(duplicated_paths)))
         # Notify user about corrupted entries
         if corrupted_paths:
-            notifier_cls.notify(messages_cls.ManualProcessing.CORRUPTED_PATHS_f.format(paths=corrupted_paths), NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["infos"], "corrupted_removed", cli_assets).format(count=len(corrupted_paths)))
 
         path_data = pd.DataFrame()
         path_data[required_col1] = valid_paths
@@ -485,10 +466,9 @@ def manual_input_loop(services: AppServices): # 2nd level
         max_depth = path_data["BranchMaxDepth"].max()
         folder_scope = {depth: [] for depth in range(1, max_depth + 1)}
         folder_depths = sorted(list(set(path_data["FolderPathDepth"])))
-        return_back = False 
+        skip_all = False
+        reload = False
         for folder_depth in folder_depths:
-            if return_back:
-                break
             temp_data = path_data.loc[path_data["FolderPathDepth"] == folder_depth]
             for idx in temp_data.index:
                 folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
@@ -496,44 +476,51 @@ def manual_input_loop(services: AppServices): # 2nd level
                 depth_options = [depth for depth in range(folder_depth, max_depth + 1)]
                 if folder_path not in folder_scope[folder_depth]:
                     print(f"\n--> In processing {folder_path}")
-                    action, depth_input = depth_input_loop(services, depth_options)
-                    match action:
+                    depth_input, in_action = depth_loop(menus, depth_options)
+                    match in_action:
                         case MenuActions.SKIP:
                             continue
+                        case MenuActions.SKIP_ALL:
+                            skip_all = True
+                            break
+                        case MenuActions.INTERUPT:
+                            reload = True
+                            break
                         case MenuActions.SUCCESS:
                             get_folders_under(folder_path, depth_input, folder_scope)
                             continue
-                        case MenuActions.RETURN:
-                            folder_scope = {depth: [] for depth in range(1, max_depth + 1)}
-                            return_back = True
-                            notifier_cls.notify(messages_cls.ManualProcessing.INPUT_RESET, NotificationLevel.INFO)
-                            break
                 else:
                     print(f"\n--> In processing {folder_path}")
-                    print(f"Skiped as already in scope. Hierarchy resolution step required")
-
-        if return_back:
+                    print(render_cli_element(cli_elements["infos"], "hierarchy_clash", cli_assets))
+            
+            if skip_all or reload:
+                break
+        if reload:
             continue
+        
+        total_paths_added = 0
+        for depth in folder_scope:
+            total_paths_added += len(folder_scope[depth])
+        
+        if total_paths_added == 0:
+            return folder_scope, MenuActions.FAILED
         
         return folder_scope, MenuActions.SUCCESS
 
-def depth_input_loop(services: AppServices, depth_options): # 3rd level
-    
-    menu_cls = services.menu
-    notifier_cls = services.notifier
-    messages_cls = services.messages
-    prompt_cls = services.prompt
+def depth_loop(menus, cli_elements, cli_assets, depth_options): # 3rd level
 
     while True:
         # Request user input
-        depth_input, action = prompt_user(
-            menu_cls.depth_input(depth_options),
-            prompt_cls.MAIN,
-        )
+        depth_menu = menus["depth_menu"]
+        for menu_line in depth_menu:
+            config_name, context = menu_line
+            print(render_cli_element(cli_elements[config_name], context, cli_assets))
+        depth_input, action = prompt_user(render_cli_element(cli_elements["prompts"], "depth", cli_assets).format(depth_range=depth_options))
         match action:
             case MenuActions.SUCCESS:
                 depth_input = lower_text(strip_text(depth_input))
             case MenuActions.INTERUPT:
+                print()
                 return None, MenuActions.INTERUPT
 
         if depth_input == "skip":
@@ -546,11 +533,10 @@ def depth_input_loop(services: AppServices, depth_options): # 3rd level
             if depth_input in depth_options:
                 return depth_input, MenuActions.SUCCESS
             else:
-                notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
+                print(render_cli_element(cli_elements["warnings"], "invalid_input", cli_assets))
                 continue
         except ValueError:
-            notifier_cls.notify(messages_cls.Base.INVALID_INPUT, NotificationLevel.WARNING)
+            print(render_cli_element(cli_elements["warnings"], "invalid_input", cli_assets))
 
 if __name__ == "__main__":
-    app_services = AppServices(Menu, Prompt, Messages, Notifier)
-    paths_by_depth = main_loop(app_services)
+    paths_by_depth = main_loop(menus, cli_elements, cli_assets)
