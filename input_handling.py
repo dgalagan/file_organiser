@@ -136,67 +136,50 @@ class Template:
     EMO_SEP_MSG = "{start}{emoji}{separator}{text}"
 
 class Token:
-    def __init__(self, token):
+    def __init__(self, token: str):
         self.token = token
-    
-    def repeat(self, count: int, delim: str = "") -> str:
+    def repeat_with_delim(self, count: int, delim: str = "") -> str:
+        if not isinstance(count, int) or count < 1:
+            raise ValueError(f"count must be an int > 0, got {type(count).__name__} with value {count}")
+        if not isinstance(delim, str):
+            raise ValueError(f"delimiter must be a string, got {type(delim).__name__}")
         return delim.join([self.token] * count)
+    def repeat(self, count: int) -> str:
+        return self.token * count
+    def __str__(self):
+        return self.token
 
 class Delimiter:
-    SPACE = " "
-    DASH = "-"
-    COMMA = ","
-    PIPE = "|"
-    FORWARDSLASH = "/"
-    BACKSLASH = "\\"
+    SPACE = Token(" ")
+    DASH = Token("-")
+    COMMA = Token(",")
+    PIPE = Token("|")
+    FORWARDSLASH = Token("/")
+    BACKSLASH = Token("\\")
 
 class Emoji:
     KEYBOARD = Token('⌨️')
     CHECKMARK = Token('✅')
     CROSSMARK = Token('❌')
-    STOPSIGN = '🛑'
-    WARNINGSIGN = '⚠️'
-    RIGHTARROW = '➡️'
-    DOWNARROW = "⬇️"
-    LEFTWARDARROW = '↩️'
-    RESTART = '🔄'
-    INFORMATION = 'ℹ️'
+    STOPSIGN = Token('🛑')
+    WARNINGSIGN = Token('⚠️')
+    RIGHTARROW = Token('➡️')
+    DOWNARROW = Token("⬇️")
+    LEFTWARDARROW = Token('↩️')
+    RESTART = Token('🔄')
+    INFORMATION = Token('ℹ️')
     BULLSEYE = Token('🎯')
     HOURGLASS = Token('⏳')
 
 class Icon:
-    DOWNARROW = "↓"
+    DOWNARROW = Token("↓")
 
-DELIMITERS = [" ", "|", "-", ","]
-HEADER = "{start}{separator}{text}{separator}"
-SHARED = "{start}{emoji}{separator}{text}"
-
-cli_tokens = {
-    "emojis": {
-        "empty": '🚫',
-        "keyboard":'⌨️',
-        "check_mark": '✅',
-        "cross_mark": '❌',
-        "stop_sign": '🛑',
-        "warning_sign": '⚠️',
-        "right_arrow": '➡️',
-        "down_arrow": "⬇️",
-        "leftwards_arrow_with_hook": '↩️',
-        "restart": '🔄',
-        "information":'ℹ️',
-        "bullseye": '🎯',
-        "hourglass": '⏳'
-    },
-    "icons": {
-        "down_arrow": "↓",
-    },
-}
 cli_objects = {  
     "headers": {
-        "template": HEADER,
+        "template": Template.SEP_MSG_SEP,
         "defaults": {
             "start": "\n",
-            "separator": DELIMITERS[2] * 5,
+            "separator": Delimiter.DASH.repeat(5),
             "text": "default"
         },
         "elements":{
@@ -207,29 +190,29 @@ cli_objects = {
         }
     },
     "menu_lines": {
-        "template": "shared",
+        "template": Template.EMO_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": ("empty", 1),
-            "separator": DELIMITERS[0] * 2,
+            "emoji": Emoji.KEYBOARD,
+            "separator": Delimiter.SPACE.repeat(2),
             "text": "default"
         },
         "elements": {
-            "exit": {"emoji": ("cross_mark", 1), "separator": DELIMITERS[0], "text": "Press 'Ctrl+C' to suspend the script"},
-            "return_back": {"emoji": ("leftwards_arrow_with_hook", 1), "text": "Press 'Ctrl+C' to go back"},
-            "restart": {"emoji": ("restart", 1), "separator": DELIMITERS[0], "text": "Press 'Ctrl+C' to cancel current input and retry"},
-            "skip": {"emoji": ("keyboard", 1), "text": "Type 'skip' to skip folder path"},
-            "skip_all": {"emoji": ("keyboard", 1), "text": "Type 'skipall' to skip the rest of folder path(s)"},
-            "csv_load": {"emoji": ("keyboard", 1), "text": "Type 'csv' to load folder path(s) from CSV"},
-            "manual_load": {"emoji": ("keyboard", 1),"text": "Type 'manual' to provide folder path(s) directly in CLI"}
+            "exit": {"emoji": Emoji.CROSSMARK, "separator": Delimiter.SPACE, "text": "Press 'Ctrl+C' to suspend the script"},
+            "return_back": {"emoji": Emoji.LEFTWARDARROW, "text": "Press 'Ctrl+C' to go back"},
+            "restart": {"emoji": Emoji.RESTART, "separator": Delimiter.SPACE, "text": "Press 'Ctrl+C' to cancel current input and retry"},
+            "skip": {"text": "Type 'skip' to skip folder path"},
+            "skip_all": {"text": "Type 'skipall' to skip the rest of folder path(s)"},
+            "csv_load": {"text": "Type 'csv' to load folder path(s) from CSV"},
+            "manual_load": {"text": "Type 'manual' to provide folder path(s) directly in CLI"}
         }
     },
     "prompts": {
-        "template": SHARED,
+        "template": Template.EMO_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": ("right_arrow", 1),
-            "separator": DELIMITERS[0] * 2,
+            "emoji": Emoji.RIGHTARROW,
+            "separator": Delimiter.SPACE.repeat(2),
             "text": "Provide your option: "
         },
         "elements": {
@@ -239,11 +222,11 @@ cli_objects = {
         }
     },
     "warnings": {
-        "template": SHARED,
+        "template": Template.EMO_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": ("warning_sign", 1),
-            "separator": DELIMITERS[0] * 2,
+            "emoji": Emoji.WARNINGSIGN,
+            "separator": Delimiter.SPACE,
             "text": "default"
         },
         "elements": {
@@ -256,20 +239,20 @@ cli_objects = {
         }
     },
     "infos": {
-        "template": SHARED,
+        "template": Template.EMO_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": ("information", 1),
-            "separator": DELIMITERS[0] * 2,
+            "emoji": Emoji.INFORMATION,
+            "separator": Delimiter.SPACE.repeat(2),
             "text": "default"
         },
         "elements": {
             "exit": {"text": "Script terminated"}, # General
-            "output_ready": {"emoji": ("bullseye", 3), "text": "Output ready"}, # General
+            "output_ready": {"emoji": Emoji.BULLSEYE.repeat(3), "text": "Output ready"}, # General
             "valid_paths": {"text": "Valid folder path(s) identified {path_count}"}, # Folder paths
             "duplicated_removed": {"text": "{path_count} duplicate path(s) removed"}, # Folder paths
             "corrupted_removed": {"text": "{path_count} corrupted path(s) removed"}, # Folder paths
-            "processing": {"emoji": ("hourglass", 1), "separator": DELIMITERS[0], "text": "[Processing] -----> {path}"}, # Paths selection
+            "processing": {"emoji": Emoji.HOURGLASS, "separator": Delimiter.SPACE, "text": "[Processing] -----> {path}"}, # Paths selection
             "added": {"text": "[Added] -----> {path_count} folder path(s)"}, # Paths selection
             "skipped": {"text": "[Skipped] -----> as already in scope"}, # Paths selection
         }
@@ -297,38 +280,12 @@ cli_grouped_objects = {
     ]
 }
 
-# CLI execution logic
-def verify_cli_token_config(token_config: tuple, tokens: dict) -> dict:
-    params = {}
-    for index, value in enumerate(token_config):
-        if index == 0 and value in tokens:
-            params["token"] = tokens[value]
-        if index == 1 and isinstance(value, int):
-            params["count"] = value
-        if index == 2 and len(set(value)) == 1 and list(set(value))[0] in cli_tokens["delimiters"]:
-            params["delimiter"] = value
-    return params
-
-def render_cli_token(token, count, delimiter=""):
-    if not isinstance(token, str):
-        raise ValueError(f"token must be a string, got {type(token).__name__}")
-    if not isinstance(count, int) or count < 1:
-        raise ValueError(f"token_count must be an int > 0, got {type(count).__name__} with value {count}")
-    if not isinstance(delimiter, str):
-        raise ValueError(f"delimiter must be a string, got {type(delimiter).__name__}")
-    tokens = [token] * count
-    return delimiter.join(tokens)
-
-def render_cli_object(cli_tokens: dict, cli_object: dict, key: str = None, required_tokens: set = {"emojis", "icons"}, **runtime_args) -> str:
+def render_cli_object(cli_object: dict, key: str = None, **runtime_args) -> str:
     # Validate CLI object dict
     assert isinstance(cli_object, dict), f"CLI group should be a dictionary, {type(cli_object)} provided instead"
     assert "template" in cli_object, "Template is missing"
     assert "defaults" in cli_object, "Defaults is missing"
     assert "elements" in cli_object, "Elements is missing"
-    # Validate CLI assets
-    assert isinstance(cli_tokens, dict), f"CLI tokens should be a dictionary, {type(cli_tokens)} provided instead"
-    missing_tokens = required_tokens - cli_tokens.keys()
-    assert not missing_tokens, f"Missing CLI assets keys: {missing_tokens}"
     # Unpack CLI assets
     template = cli_object.get("template")
     elements = cli_object.get("elements")
@@ -341,14 +298,6 @@ def render_cli_object(cli_tokens: dict, cli_object: dict, key: str = None, requi
     missing_configs = template_args - merged_config.keys()
     assert not missing_configs, f"Missing config arguments keys: {missing_configs}"
     # Fill in the template placeholders
-    if "icon" in merged_config:
-        icons_config = merged_config["icon"]
-        params = verify_cli_token_config(icons_config, cli_tokens["icons"])
-        merged_config["icon"] = render_cli_token(**params)
-    if "emoji" in merged_config:
-        emoji_config = merged_config["emoji"]
-        params = verify_cli_token_config(emoji_config, cli_tokens["emojis"])
-        merged_config["emoji"] = render_cli_token(**params)
     if "text" in merged_config:
         text_args = get_placeholders(merged_config["text"])
         if text_args:
@@ -358,7 +307,6 @@ def render_cli_object(cli_tokens: dict, cli_object: dict, key: str = None, requi
     final_element = template.format(**merged_config)
     return final_element
 
-
 def prompt_user(prompt: str)-> Tuple[str | None, MenuActions | None]:
     try:
         user_input = input(prompt)
@@ -366,7 +314,7 @@ def prompt_user(prompt: str)-> Tuple[str | None, MenuActions | None]:
     except KeyboardInterrupt:
         return None, MenuActions.INTERUPT
 
-def main_loop(cli_tokens, cli_objects, cli_grouped_objects): # 1st level
+def main_loop(cli_grouped_objects, cli_objects): # 1st level
     
     input_handler = {
         "csv": csv_loop,
@@ -378,37 +326,37 @@ def main_loop(cli_tokens, cli_objects, cli_grouped_objects): # 1st level
         main_menu = cli_grouped_objects["main_menu"]
         for menu_line in main_menu:
             object_name, element = menu_line
-            print(render_cli_object(cli_tokens, cli_objects[object_name], element))
-        user_input, action = prompt_user(render_cli_object(cli_tokens, cli_objects["prompts"]))
+            print(render_cli_object(cli_objects[object_name], element))
+        user_input, action = prompt_user(render_cli_object(cli_objects["prompts"]))
         match action:
             case MenuActions.SUCCESS:
                 user_input = lower_text(strip_text(user_input))
             case MenuActions.INTERUPT:
-                print(render_cli_object(cli_tokens, cli_objects["infos"], "exit"))
+                print(render_cli_object(cli_objects["infos"], "exit"))
                 break
 
         #  User input handling
         handler = input_handler.get(user_input)
 
         if not handler:
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "invalid_input"))
+            print(render_cli_object(cli_objects["warnings"], "invalid_input"))
             continue
         
         loop_func = handler
-        folder_scope, in_action = loop_func(cli_tokens, cli_objects, cli_grouped_objects)
+        folder_scope, in_action = loop_func(cli_grouped_objects, cli_objects)
 
         # Loop control parameters check
         match in_action:
             case MenuActions.INTERUPT:
                 continue
             case MenuActions.FAILED:
-                print(render_cli_object(cli_tokens, cli_objects["warnings"], "empty_input"))
+                print(render_cli_object(cli_objects["warnings"], "empty_input"))
                 continue
             case MenuActions.SUCCESS:
-                print(render_cli_object(cli_tokens, cli_objects["infos"], "output_ready"))
+                print(render_cli_object(cli_objects["infos"], "output_ready"))
                 return folder_scope
 
-def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
+def csv_loop(cli_grouped_objects, cli_objects): # 2nd level
     
     # Required CSV columns for correct input validation
     required_col1 = "FolderPath"
@@ -419,8 +367,8 @@ def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
         csv_menu = cli_grouped_objects["csv_menu"]
         for menu_line in csv_menu:
             object_name, element = menu_line
-            print(render_cli_object(cli_tokens, cli_objects[object_name], element))
-        user_input, action = prompt_user(render_cli_object(cli_tokens, cli_objects["prompts"], "csv"))
+            print(render_cli_object(cli_objects[object_name], element))
+        user_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "csv"))
         match action:
             case MenuActions.SUCCESS:
                 user_input = strip_text(user_input)
@@ -430,22 +378,22 @@ def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
         
         # Check whether provided link is file, otherwise continue
         if not is_file(user_input):
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "file_not_found", path=user_input))
+            print(render_cli_object(cli_objects["warnings"], "file_not_found", path=user_input))
             continue
         # Check whether file extension == 'csv', otherwise continue
         file_ext = get_file_extension(user_input)
         file_ext = lower_text(strip_text(file_ext))
         if file_ext != '.csv':
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "extension_not_supported", ext=file_ext))
+            print(render_cli_object(cli_objects["warnings"], "extension_not_supported", ext=file_ext))
             continue
         # Open CSV file as dataframe
         csv_data, e = open_csv(user_input)
         if e:
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "csv_load_failed", error=e))
+            print(render_cli_object(cli_objects["warnings"], "csv_load_failed", error=e))
             continue
         # Validate CSV columns
         if required_col1 not in csv_data.columns:
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "missing_columns", cols=required_col1))
+            print(render_cli_object(cli_objects["warnings"], "missing_columns", cols=required_col1))
             continue
         # Validate CSV data
         csv_data[test_req1] = csv_data[required_col1].apply(lambda x: True if is_folder(x) else False)
@@ -453,12 +401,12 @@ def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
         normalized_csv_data = remove_duplicates(csv_data, column_name=required_col1)
         duplicates_count = csv_data.shape[0] - normalized_csv_data.shape[0]
         if duplicates_count:
-            print(render_cli_object(cli_tokens, cli_objects["infos"], "duplicated_removed", path_count=duplicates_count))
+            print(render_cli_object(cli_objects["infos"], "duplicated_removed", path_count=duplicates_count))
         # Select valid entries
         condition = normalized_csv_data[test_req1] == True
         filtered_csv_data = filter_df(normalized_csv_data, condition)
         if filtered_csv_data.empty:
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "empty_input"))
+            print(render_cli_object(cli_objects["warnings"], "empty_input"))
             continue
         # Define max depth available
         filtered_csv_data["FolderPathDepth"] = filtered_csv_data[required_col1].apply(lambda x: get_path_depth(x))
@@ -476,11 +424,11 @@ def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
                 folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
                 max_depth = temp_data.loc[idx, "BranchMaxDepth"]
                 depth_options = [depth for depth in range(depth, max_depth + 1)]
-                print(DELIMITERS[2] * 80)
-                print(render_cli_object(cli_tokens, cli_objects["infos"], "processing", path=folder_path))
-                print(render_cli_token(cli_tokens["icons"]["down_arrow"], 3))
+                print(Delimiter.DASH.repeat(80))
+                print(render_cli_object(cli_objects["infos"], "processing", path=folder_path))
+                print(Icon.DOWNARROW.repeat(3))
                 if folder_path not in paths_by_depth[depth]:
-                    depth_input, in_action = depth_loop(cli_tokens, cli_objects, cli_grouped_objects, depth_options)
+                    depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, depth_options)
                     match in_action:
                         case MenuActions.SKIP:
                             continue
@@ -496,17 +444,17 @@ def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
                                 paths_by_depth[depth].append(folder_path)
                                 paths_added += 1
                             total_paths_added += paths_added
-                            print(render_cli_token(cli_tokens["icons"]["down_arrow"], 3))
-                            print(render_cli_object(cli_tokens, cli_objects["infos"], "added", path_count=paths_added))
+                            print(Icon.DOWNARROW.repeat(3))
+                            print(render_cli_object(cli_objects["infos"], "added", path_count=paths_added))
                             continue
                 else:
-                    print(render_cli_object(cli_tokens, cli_objects["infos"], "skipped"))
+                    print(render_cli_object(cli_objects["infos"], "skipped"))
                     # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new 
             if skip_all or reload:
                 break
         if reload:
             continue
-        print(DELIMITERS[2] * 80)
+        print(Delimiter.DASH.repeat(80))
         print(f"Total paths selected {total_paths_added}")
         
         if total_paths_added == 0:
@@ -514,7 +462,7 @@ def csv_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
         
         return paths_by_depth, MenuActions.SUCCESS
 
-def manual_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
+def manual_loop(cli_grouped_objects, cli_objects): # 2nd level
     
     # Separator to parse user input
     separator = ","
@@ -616,15 +564,15 @@ def manual_loop(cli_tokens, cli_objects, cli_grouped_objects): # 2nd level
         
         return folder_scope, MenuActions.SUCCESS
 
-def depth_loop(cli_tokens, cli_objects, cli_grouped_objects, depth_options): # 3rd level
+def depth_loop(cli_grouped_objects, cli_objects, depth_options): # 3rd level
 
     while True:
         # Request user input
         depth_menu = cli_grouped_objects["depth_menu"]
         for menu_line in depth_menu:
             object_name, element = menu_line
-            print(render_cli_object(cli_tokens, cli_objects[object_name], element))
-        depth_input, action = prompt_user(render_cli_object(cli_tokens, cli_objects["prompts"], "depth", depth_range=depth_options))
+            print(render_cli_object(cli_objects[object_name], element))
+        depth_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "depth", depth_range=depth_options))
         match action:
             case MenuActions.SUCCESS:
                 depth_input = lower_text(strip_text(depth_input))
@@ -642,11 +590,10 @@ def depth_loop(cli_tokens, cli_objects, cli_grouped_objects, depth_options): # 3
             if depth_input in depth_options:
                 return depth_input, MenuActions.SUCCESS
             else:
-                print(render_cli_object(cli_tokens, cli_objects["warnings"], "invalid_input"))
+                print(render_cli_object(cli_objects["warnings"], "invalid_input"))
                 continue
         except ValueError:
-            print(render_cli_object(cli_tokens, cli_objects["warnings"], "invalid_input"))
+            print(render_cli_object(cli_objects["warnings"], "invalid_input"))
 
 if __name__ == "__main__":
-    # paths_by_depth = main_loop(cli_tokens, cli_objects, cli_grouped_objects)
-    print(f"{Emoji.KEYBOARD.repeat(-2, delim="  | ")}")
+    paths_by_depth = main_loop(cli_grouped_objects, cli_objects)
