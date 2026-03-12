@@ -1,16 +1,19 @@
-from dataclasses import dataclass
 from enum import StrEnum, auto
 import os
 import pandas as pd
 from pandas.errors import ParserError
 from string import Formatter
-from typing import Tuple, Optional, Iterable, Iterator, Self
+from typing import Tuple, Optional, Iterable, Iterator
 
 # Glossary
-# Depth = maximum processing radius downward
+# Depth = maximum processing radius from drive
+# depth starting index 0 vs 1 ?
 
 # To improve:
 # instead of os.walk(), create recursion based on os.scandir()
+# auto alignment of header object between separators
+# create function for duplicated code part in csv and manual loop
+# convert paths by depth ito 1 list
 
 ## String helpers
 def lower_text(text: str) -> str:
@@ -132,9 +135,8 @@ class MenuActions(StrEnum):
     FAILED = auto()
 
 class Template:
-    SEP_MSG_SEP = "{start}{separator}{text}{separator}"
-    EMO_SEP_MSG = "{start}{emoji}{separator}{text}"
-
+    SEP_MSG_SEP = "{start}{sep}{msg}{sep}"
+    ICON_SEP_MSG = "{start}{icon}{sep}{msg}"
 class Token:
     def __init__(self, token: str):
         self.token = token
@@ -148,7 +150,6 @@ class Token:
         return self.token * count
     def __str__(self):
         return self.token
-
 class Delimiter:
     SPACE = Token(" ")
     DASH = Token("-")
@@ -156,7 +157,6 @@ class Delimiter:
     PIPE = Token("|")
     FORWARDSLASH = Token("/")
     BACKSLASH = Token("\\")
-
 class Emoji:
     KEYBOARD = Token('⌨️')
     CHECKMARK = Token('✅')
@@ -170,7 +170,7 @@ class Emoji:
     INFORMATION = Token('ℹ️')
     BULLSEYE = Token('🎯')
     HOURGLASS = Token('⏳')
-
+    CHEQUEREDFLAG = Token('🏁')
 class Icon:
     DOWNARROW = Token("↓")
 
@@ -179,82 +179,83 @@ cli_objects = {
         "template": Template.SEP_MSG_SEP,
         "defaults": {
             "start": "\n",
-            "separator": Delimiter.DASH.repeat(5),
-            "text": "default"
+            "sep": Delimiter.DASH,
+            "msg": "empty"
         },
         "elements":{
-            "main": {"text": "Main"},
-            "csv_load": {"text": "CSV load"},
-            "manual_load": {"text": "Manual load"},
-            "depth": {"text": "Depth"}
+            "main": {"sep": Delimiter.DASH.repeat(25), "msg": "Main"},
+            "csv_load": {"sep": Delimiter.DASH.repeat(23), "msg": "CSV load"},
+            "manual_load": {"sep": Delimiter.DASH.repeat(22), "msg": "Manual load"},
+            "depth": {"sep": Delimiter.DASH.repeat(25), "msg": "Depth"}
         }
     },
     "menu_lines": {
-        "template": Template.EMO_SEP_MSG,
+        "template": Template.ICON_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": Emoji.KEYBOARD,
-            "separator": Delimiter.SPACE.repeat(2),
-            "text": "default"
+            "icon": Emoji.KEYBOARD,
+            "sep": Delimiter.SPACE.repeat(2),
+            "msg": "empty"
         },
         "elements": {
-            "exit": {"emoji": Emoji.CROSSMARK, "separator": Delimiter.SPACE, "text": "Press 'Ctrl+C' to suspend the script"},
-            "return_back": {"emoji": Emoji.LEFTWARDARROW, "text": "Press 'Ctrl+C' to go back"},
-            "restart": {"emoji": Emoji.RESTART, "separator": Delimiter.SPACE, "text": "Press 'Ctrl+C' to cancel current input and retry"},
-            "skip": {"text": "Type 'skip' to skip folder path"},
-            "skip_all": {"text": "Type 'skipall' to skip the rest of folder path(s)"},
-            "csv_load": {"text": "Type 'csv' to load folder path(s) from CSV"},
-            "manual_load": {"text": "Type 'manual' to provide folder path(s) directly in CLI"}
+            "exit": {"icon": Emoji.CROSSMARK, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to suspend the script"},
+            "return_back": {"icon": Emoji.LEFTWARDARROW, "msg": "Press 'Ctrl+C' to go back"},
+            "restart": {"icon": Emoji.RESTART, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to cancel current input and retry"},
+            "skip": {"msg": "Type 'skip' to skip folder path"},
+            "skip_all": {"msg": "Type 'skipall' to skip the rest of folder path(s)"},
+            "csv_load": {"msg": "Type 'csv' to load folder path(s) from CSV"},
+            "manual_load": {"msg": "Type 'manual' to provide folder path(s) directly in CLI"}
         }
     },
     "prompts": {
-        "template": Template.EMO_SEP_MSG,
+        "template": Template.ICON_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": Emoji.RIGHTARROW,
-            "separator": Delimiter.SPACE.repeat(2),
-            "text": "Provide your option: "
+            "icon": Emoji.RIGHTARROW,
+            "sep": Delimiter.SPACE.repeat(2),
+            "msg": "Provide your option: "
         },
         "elements": {
-            "csv": {"text": "Provide link to CSV file: "},
-            "manual": {"text": "Provide one or several folder path(s) separated with {paths_separator}: "},
-            "depth": {"text": "Provide 'depth' value from the range {depth_range}: "}
+            "csv": {"msg": "Provide link to CSV file: "},
+            "manual": {"msg": "Provide one or several folder path(s) separated with {paths_separator}: "},
+            "depth": {"msg": "Provide 'depth' value from the range {depth_range}: "}
         }
     },
     "warnings": {
-        "template": Template.EMO_SEP_MSG,
+        "template": Template.ICON_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": Emoji.WARNINGSIGN,
-            "separator": Delimiter.SPACE,
-            "text": "default"
+            "icon": Emoji.WARNINGSIGN,
+            "sep": Delimiter.SPACE,
+            "msg": "empty"
         },
         "elements": {
-            "invalid_input": {"text": "Invalid input"}, # General
-            "empty_input": {"text": "No folder path(s) to process"}, # General
-            "csv_load_failed": {"text": "CSV loading failed with {error}"}, # CSV
-            "file_not_found": {"text": "Provided path '{path}' is not a file"}, # File / Extension
-            "extension_not_supported": {"text": "Provided extension '{ext}' is not supported"}, # File / Extension
-            "missing_columns": {"text": "Required columns {cols} are missing"}, # Columns
+            "invalid_input": {"msg": "Invalid input"}, # General
+            "empty_input": {"msg": "No folder path(s) to process"}, # General
+            "csv_load_failed": {"msg": "CSV loading failed with {error}"}, # CSV
+            "file_not_found": {"msg": "Provided path '{path}' is not a file"}, # File / Extension
+            "extension_not_supported": {"msg": "Provided extension '{ext}' is not supported"}, # File / Extension
+            "missing_columns": {"msg": "Required columns {cols} are missing"}, # Columns
         }
     },
     "infos": {
-        "template": Template.EMO_SEP_MSG,
+        "template": Template.ICON_SEP_MSG,
         "defaults": {
             "start": "",
-            "emoji": Emoji.INFORMATION,
-            "separator": Delimiter.SPACE.repeat(2),
-            "text": "default"
+            "icon": Emoji.INFORMATION,
+            "sep": Delimiter.SPACE.repeat(2),
+            "msg": "empty"
         },
         "elements": {
-            "exit": {"text": "Script terminated"}, # General
-            "output_ready": {"emoji": Emoji.BULLSEYE.repeat(3), "text": "Output ready"}, # General
-            "valid_paths": {"text": "Valid folder path(s) identified {path_count}"}, # Folder paths
-            "duplicated_removed": {"text": "{path_count} duplicate path(s) removed"}, # Folder paths
-            "corrupted_removed": {"text": "{path_count} corrupted path(s) removed"}, # Folder paths
-            "processing": {"emoji": Emoji.HOURGLASS, "separator": Delimiter.SPACE, "text": "[Processing] -----> {path}"}, # Paths selection
-            "added": {"text": "[Added] -----> {path_count} folder path(s)"}, # Paths selection
-            "skipped": {"text": "[Skipped] -----> as already in scope"}, # Paths selection
+            "exit": {"msg": "Script terminated"}, # General
+            "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Output ready"},
+            "valid_paths": {"msg": "Valid folder path(s) identified {path_count}"},
+            "duplicated_removed": {"msg": "{path_count} duplicate path(s) removed"},
+            "corrupted_removed": {"msg": "{path_count} corrupted path(s) removed"},
+            "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {path}"},
+            "added": {"msg": "[Added] -----> {path_count} folder path(s)"},
+            "skipped": {"msg": "[Skipped] -----> as already in scope"},
+            "selected":{"icon": Emoji.BULLSEYE.repeat(1), "msg": "[Selected] -----> {path_count} folder path(s)"}
         }
     },
 }
@@ -280,32 +281,40 @@ cli_grouped_objects = {
     ]
 }
 
-def render_cli_object(cli_object: dict, key: str = None, **runtime_args) -> str:
+def render_cli_object(object: dict, element: str = None, **runtime_args) -> str:
     # Validate CLI object dict
-    assert isinstance(cli_object, dict), f"CLI group should be a dictionary, {type(cli_object)} provided instead"
-    assert "template" in cli_object, "Template is missing"
-    assert "defaults" in cli_object, "Defaults is missing"
-    assert "elements" in cli_object, "Elements is missing"
+    assert isinstance(object, dict), f"CLI object should be a dictionary, {type(object)} provided instead"
+    assert "template" in object, "Template is missing"
+    assert "defaults" in object, "Defaults is missing"
+    assert "elements" in object, "Elements is missing"
     # Unpack CLI assets
-    template = cli_object.get("template")
-    elements = cli_object.get("elements")
+    template = object.get("template")
+    elements = object.get("elements")
     # Merge default and element configurations
-    element_config = elements.get(key, {})
-    default_config = cli_object.get("defaults", {})
+    element_config = elements.get(element, {})
+    default_config = object.get("defaults", {})
     merged_config = {**default_config, **element_config}
     # Validate template placeholders
     template_args = get_placeholders(template)
     missing_configs = template_args - merged_config.keys()
     assert not missing_configs, f"Missing config arguments keys: {missing_configs}"
     # Fill in the template placeholders
-    if "text" in merged_config:
-        text_args = get_placeholders(merged_config["text"])
+    if "msg" in merged_config:
+        text_args = get_placeholders(merged_config["msg"])
         if text_args:
             missing = text_args - runtime_args.keys()
             assert not missing, f"Missing arguments for placeholders: {missing}"
-            merged_config["text"] = merged_config["text"].format(**runtime_args)
+            merged_config["msg"] = merged_config["msg"].format(**runtime_args)
     final_element = template.format(**merged_config)
     return final_element
+
+def render_cli_grouped_object(grouped_object: dict, objects:dict) -> str:
+    rendered_objects = []
+    for object_config in grouped_object:
+        object_name, element = object_config
+        rendered_object = render_cli_object(objects[object_name], element)
+        rendered_objects.append(rendered_object)
+    return "\n".join(rendered_objects)
 
 def prompt_user(prompt: str)-> Tuple[str | None, MenuActions | None]:
     try:
@@ -323,15 +332,13 @@ def main_loop(cli_grouped_objects, cli_objects): # 1st level
 
     while True:
         # Request user input
-        main_menu = cli_grouped_objects["main_menu"]
-        for menu_line in main_menu:
-            object_name, element = menu_line
-            print(render_cli_object(cli_objects[object_name], element))
+        print(render_cli_grouped_object(cli_grouped_objects["main_menu"], cli_objects))
         user_input, action = prompt_user(render_cli_object(cli_objects["prompts"]))
         match action:
             case MenuActions.SUCCESS:
                 user_input = lower_text(strip_text(user_input))
             case MenuActions.INTERUPT:
+                print()
                 print(render_cli_object(cli_objects["infos"], "exit"))
                 break
 
@@ -364,10 +371,7 @@ def csv_loop(cli_grouped_objects, cli_objects): # 2nd level
     
     while True:
         # Request user input
-        csv_menu = cli_grouped_objects["csv_menu"]
-        for menu_line in csv_menu:
-            object_name, element = menu_line
-            print(render_cli_object(cli_objects[object_name], element))
+        print(render_cli_grouped_object(cli_grouped_objects["csv_menu"], cli_objects))
         user_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "csv"))
         match action:
             case MenuActions.SUCCESS:
@@ -387,39 +391,40 @@ def csv_loop(cli_grouped_objects, cli_objects): # 2nd level
             print(render_cli_object(cli_objects["warnings"], "extension_not_supported", ext=file_ext))
             continue
         # Open CSV file as dataframe
-        csv_data, e = open_csv(user_input)
+        raw_data, e = open_csv(user_input)
         if e:
             print(render_cli_object(cli_objects["warnings"], "csv_load_failed", error=e))
             continue
         # Validate CSV columns
-        if required_col1 not in csv_data.columns:
+        if required_col1 not in raw_data.columns:
             print(render_cli_object(cli_objects["warnings"], "missing_columns", cols=required_col1))
             continue
+        # ↓↓↓ same in manual
         # Validate CSV data
-        csv_data[test_req1] = csv_data[required_col1].apply(lambda x: True if is_folder(x) else False)
+        raw_data[test_req1] = raw_data[required_col1].apply(lambda x: True if is_folder(x) else False)
         # Normalize CSV data
-        normalized_csv_data = remove_duplicates(csv_data, column_name=required_col1)
-        duplicates_count = csv_data.shape[0] - normalized_csv_data.shape[0]
+        normalized_data = remove_duplicates(raw_data, column_name=required_col1)
+        duplicates_count = raw_data.shape[0] - normalized_data.shape[0]
         if duplicates_count:
             print(render_cli_object(cli_objects["infos"], "duplicated_removed", path_count=duplicates_count))
         # Select valid entries
-        condition = normalized_csv_data[test_req1] == True
-        filtered_csv_data = filter_df(normalized_csv_data, condition)
-        if filtered_csv_data.empty:
+        condition = normalized_data[test_req1] == True
+        path_data = filter_df(normalized_data, condition)
+        if path_data.empty:
             print(render_cli_object(cli_objects["warnings"], "empty_input"))
             continue
-        # Define max depth available
-        filtered_csv_data["FolderPathDepth"] = filtered_csv_data[required_col1].apply(lambda x: get_path_depth(x))
-        filtered_csv_data["BranchMaxDepth"] = filtered_csv_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
+        # Enrich path data
+        path_data["FolderPathDepth"] = path_data[required_col1].apply(lambda x: get_path_depth(x))
+        path_data["BranchMaxDepth"] = path_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
         # Define depth and resolve parent-child relationship
-        max_depth = filtered_csv_data["BranchMaxDepth"].max()
+        max_depth = path_data["BranchMaxDepth"].max()
         paths_by_depth = {depth: [] for depth in range(1, max_depth + 1)}
-        depths = sorted(list(set(filtered_csv_data["FolderPathDepth"])))
+        depths = sorted(list(set(path_data["FolderPathDepth"])))
         skip_all = False
         reload = False
         total_paths_added = 0
         for depth in depths:
-            temp_data = filtered_csv_data.loc[filtered_csv_data["FolderPathDepth"] == depth]
+            temp_data = path_data.loc[path_data["FolderPathDepth"] == depth]
             for idx in temp_data.index:
                 folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
                 max_depth = temp_data.loc[idx, "BranchMaxDepth"]
@@ -455,7 +460,8 @@ def csv_loop(cli_grouped_objects, cli_objects): # 2nd level
         if reload:
             continue
         print(Delimiter.DASH.repeat(80))
-        print(f"Total paths selected {total_paths_added}")
+        print(render_cli_object(cli_objects["infos"], "selected", path_count=total_paths_added))
+        print(Icon.DOWNARROW.repeat(3))
         
         if total_paths_added == 0:
             return paths_by_depth, MenuActions.FAILED
@@ -467,14 +473,12 @@ def manual_loop(cli_grouped_objects, cli_objects): # 2nd level
     # Separator to parse user input
     separator = ","
     required_col1 = "FolderPath"
+    test_req1 = "FolderPathTest"
 
     while True:
         # Request user input
-        manual_menu = menus["manual_menu"]
-        for menu_line in manual_menu:
-            config_name, context = menu_line
-            print(render_cli_element(cli_elements[config_name], context, cli_assets))
-        user_input, action = prompt_user(render_cli_element(cli_elements["prompts"], "manual", cli_assets, paths_separator=separator))
+        print(render_cli_grouped_object(cli_grouped_objects["manual_menu"], cli_objects))
+        user_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "manual", paths_separator=separator))
         match action:
             case MenuActions.SUCCESS:
                 user_input = strip_text(user_input)
@@ -484,53 +488,42 @@ def manual_loop(cli_grouped_objects, cli_objects): # 2nd level
         
         # Parse user input
         folder_paths = split_text(user_input, separator)
-        
-        # Process folder path(s)
-        duplicated_paths = []
-        corrupted_paths = []
-        valid_paths = []
-
-        for folder_path in folder_paths:
-            if is_folder(folder_path):
-                if folder_path not in valid_paths:
-                    valid_paths.append(folder_path)
-                else:
-                    duplicated_paths.append(folder_path)
-            else:
-                corrupted_paths.append(folder_path)
-
-        # Notify user about valid entries
-        if not valid_paths:
-            print(render_cli_element(cli_elements["warnings"], "invalid_input", cli_assets))
+        raw_data = pd.DataFrame({required_col1: folder_paths})
+        # ↓↓↓ same in csv
+        # Validate CSV data
+        raw_data[test_req1] = raw_data[required_col1].apply(lambda x: True if is_folder(x) else False)
+        # Normalize CSV data
+        normalized_data = remove_duplicates(raw_data, column_name=required_col1)
+        duplicates_count = raw_data.shape[0] - normalized_data.shape[0]
+        if duplicates_count:
+            print(render_cli_object(cli_objects["infos"], "duplicated_removed", path_count=duplicates_count))
+        # Select valid entries
+        condition = normalized_data[test_req1] == True
+        path_data = filter_df(normalized_data, condition)
+        if path_data.empty:
+            print(render_cli_object(cli_objects["warnings"], "empty_input"))
             continue
-        print(render_cli_element(cli_elements["infos"], "valid_paths", cli_assets, path_count=len(valid_paths)))
-        # Notify user about duplicated entries
-        if duplicated_paths:
-            print(render_cli_element(cli_elements["infos"], "duplicated_removed", cli_assets, path_count=len(duplicated_paths)))
-        # Notify user about corrupted entries
-        if corrupted_paths:
-            print(render_cli_element(cli_elements["infos"], "corrupted_removed", cli_assets, path_count=len(corrupted_paths)))
-
-        path_data = pd.DataFrame()
-        path_data[required_col1] = valid_paths
+        # Enrich path data
         path_data["FolderPathDepth"] = path_data[required_col1].apply(lambda x: get_path_depth(x))
         path_data["BranchMaxDepth"] = path_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
-
         # Define depth and resolve parent-child relationship
         max_depth = path_data["BranchMaxDepth"].max()
-        folder_scope = {depth: [] for depth in range(1, max_depth + 1)}
-        folder_depths = sorted(list(set(path_data["FolderPathDepth"])))
+        paths_by_depth = {depth: [] for depth in range(1, max_depth + 1)}
+        depths = sorted(list(set(path_data["FolderPathDepth"])))
         skip_all = False
         reload = False
-        for folder_depth in folder_depths:
-            temp_data = path_data.loc[path_data["FolderPathDepth"] == folder_depth]
+        total_paths_added = 0
+        for depth in depths:
+            temp_data = path_data.loc[path_data["FolderPathDepth"] == depth]
             for idx in temp_data.index:
                 folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
                 max_depth = temp_data.loc[idx, "BranchMaxDepth"]
-                depth_options = [depth for depth in range(folder_depth, max_depth + 1)]
-                if folder_path not in folder_scope[folder_depth]:
-                    print(render_cli_element(cli_elements["infos"], "processing", cli_assets, path=folder_path))
-                    depth_input, in_action = depth_loop(menus, cli_elements, cli_assets, depth_options)
+                depth_options = [depth for depth in range(depth, max_depth + 1)]
+                print(Delimiter.DASH.repeat(80))
+                print(render_cli_object(cli_objects["infos"], "processing", path=folder_path))
+                print(Icon.DOWNARROW.repeat(3))
+                if folder_path not in paths_by_depth[depth]:
+                    depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, depth_options)
                     match in_action:
                         case MenuActions.SKIP:
                             continue
@@ -541,37 +534,35 @@ def manual_loop(cli_grouped_objects, cli_objects): # 2nd level
                             reload = True
                             break
                         case MenuActions.SUCCESS:
-                            folders_added = 0
+                            paths_added = 0
                             for depth, folder_path in iter_hierarchy_until_depth(folder_path, depth_input):
-                                folder_scope[depth].append(folder_path)
-                                folders_added += 1
-                            print(f"Folders added {folders_added}")
+                                paths_by_depth[depth].append(folder_path)
+                                paths_added += 1
+                            total_paths_added += paths_added
+                            print(Icon.DOWNARROW.repeat(3))
+                            print(render_cli_object(cli_objects["infos"], "added", path_count=paths_added))
                             continue
                 else:
-                    print(render_cli_element(cli_elements["infos"], "hierarchy_clash", cli_assets))
-            
+                    print(render_cli_object(cli_objects["infos"], "skipped"))
+                    # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new 
             if skip_all or reload:
                 break
         if reload:
             continue
-        
-        total_paths_added = 0
-        for depth in folder_scope:
-            total_paths_added += len(folder_scope[depth])
+        print(Delimiter.DASH.repeat(80))
+        print(render_cli_object(cli_objects["infos"], "selected", path_count=total_paths_added))
+        print(Icon.DOWNARROW.repeat(3))
         
         if total_paths_added == 0:
-            return folder_scope, MenuActions.FAILED
+            return paths_by_depth, MenuActions.FAILED
         
-        return folder_scope, MenuActions.SUCCESS
+        return paths_by_depth, MenuActions.SUCCESS
 
 def depth_loop(cli_grouped_objects, cli_objects, depth_options): # 3rd level
 
     while True:
         # Request user input
-        depth_menu = cli_grouped_objects["depth_menu"]
-        for menu_line in depth_menu:
-            object_name, element = menu_line
-            print(render_cli_object(cli_objects[object_name], element))
+        print(render_cli_grouped_object(cli_grouped_objects["depth_menu"], cli_objects))
         depth_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "depth", depth_range=depth_options))
         match action:
             case MenuActions.SUCCESS:
@@ -597,3 +588,5 @@ def depth_loop(cli_grouped_objects, cli_objects, depth_options): # 3rd level
 
 if __name__ == "__main__":
     paths_by_depth = main_loop(cli_grouped_objects, cli_objects)
+    # if paths_by_depth:
+    #     print(paths_by_depth)
