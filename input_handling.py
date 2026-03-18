@@ -1,7 +1,7 @@
 from enum import StrEnum, auto
 import os
 import pandas as pd
-from pandas.errors import ParserError
+from pandas.errors import ParserError, EmptyDataError
 from string import Formatter
 from typing import Tuple, Optional, Iterable, Iterator
 
@@ -50,6 +50,13 @@ def is_folder(path:str) -> bool:
 def get_file_extension(path: str) -> str:
     _, file_extension = os.path.splitext(path)
     return file_extension
+
+def has_valid_extension(path: str, expected_ext: str) -> bool:
+    if not expected_ext:
+        raise ValueError("You must provide an expected extension to validate against.")
+    file_ext = get_file_extension(path)
+    file_ext = lower_text(strip_text(file_ext))
+    return file_ext == expected_ext
 
 def get_file_basename(path: str) -> str:
     file_basename, _ = os.path.splitext(path)
@@ -101,29 +108,111 @@ def iter_hierarchy_until_depth(path: str, max_depth: int) -> Iterator[tuple[int,
         yield current_depth, root_path
 
 ## Df helpers
-def open_csv(path: str) -> Tuple[pd.DataFrame | None, None | Exception]:
-    try:
-        return pd.read_csv(path), None
-    except (FileNotFoundError, PermissionError, ParserError) as e:
-        return None, e
 
-def remove_duplicates(df: pd.DataFrame, column_name: Optional[str] = None) -> pd.DataFrame:
-
-    # Check whether column provided
-    if column_name is None:
-        return df
-    else:
-        df_normalized = df.drop_duplicates(
-            column_name, 
-            inplace=False
-            )
-    return df_normalized
+def mark_duplicates(df: pd.DataFrame, column_name: Optional[str] = None) -> pd.Series:    
+    return df.duplicated(subset=column_name)
 
 def filter_df(df: pd.DataFrame, condition: str) -> pd.DataFrame:
     return df.loc[condition].copy()
 
-def remove_subfolders(paths: list[str], to_remove: list[str]) -> list[str]:
-    return list(set(paths) - set(to_remove))
+def open_csv(path: str) -> Tuple[pd.DataFrame | None, None | Exception]:
+    try:
+        return pd.read_csv(path), None
+    except (FileNotFoundError, PermissionError, ParserError, EmptyDataError) as e:
+        return None, e
+
+def has_required_cols(path_data: pd.DataFrame, required_col: str = "FolderPath") -> bool:
+    return required_col in path_data.columns
+
+def is_empty(path_data: pd.DataFrame) -> bool:
+    return path_data.empty
+
+def filter_invalids(path_data: pd.DataFrame) -> pd.DataFrame:
+    # Validate input df
+    if is_empty(path_data):
+        return pd.DataFrame()
+    path_data["is_valid"] = path_data["FolderPath"].apply(lambda path: True if is_folder(path) else False)
+    num_invalid = path_data.shape[0] - path_data["is_valid"].sum()
+    if num_invalid:
+        print(render_cli_object(cli_objects["infos"], "invalid_entries", path_count=num_invalid))
+        path_data = filter_df(path_data, path_data["is_valid"])
+    return path_data
+
+def filter_duplicates(path_data: pd.DataFrame) -> pd.DataFrame:
+    # Validate input df
+    if is_empty(path_data):
+        return pd.DataFrame()
+    path_data["is_duplicate"] = mark_duplicates(path_data, "FolderPath")
+    num_duplicates = path_data["is_duplicate"].sum()
+    if num_duplicates:
+        print(render_cli_object(cli_objects["infos"], "duplicate_entries", path_count=num_duplicates))
+        path_data = filter_df(path_data, ~path_data["is_duplicate"])
+    return path_data
+
+def enrich_path_data(path_data: pd.DataFrame) -> pd.DataFrame:
+    if is_empty(path_data):
+        return pd.DataFrame()
+    # Enrich path data
+    path_data["FolderPathDepth"] = path_data["FolderPath"].apply(lambda path: get_path_depth(path))
+    path_data["BranchMaxDepth"] = path_data["FolderPath"].apply(lambda path: get_max_depth_from_path(path))
+    return path_data
+
+def get_paths_by_depth(path_data: pd.DataFrame) -> dict:
+    # Normalize and enrich
+    path_data = enrich_path_data(filter_duplicates(filter_invalids(path_data)))
+    if is_empty(path_data):
+        return None, MenuActions.FAILED
+    # Define depth and resolve parent-child relationship
+    max_depth = path_data["BranchMaxDepth"].max()
+    paths_by_depth = {depth: [] for depth in range(1, max_depth + 1)}
+    depths = sorted(list(set(path_data["FolderPathDepth"])))
+    skip_all = False
+    reload = False
+    total_paths_added = 0
+    for depth in depths:
+        temp_data = path_data.loc[path_data["FolderPathDepth"] == depth]
+        for idx in temp_data.index:
+            folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
+            max_depth = temp_data.loc[idx, "BranchMaxDepth"]
+            depth_options = [depth for depth in range(depth, max_depth + 1)]
+            print(Delimiter.DASH.repeat(80))
+            print(render_cli_object(cli_objects["infos"], "processing", path=folder_path))
+            print(Icon.DOWNARROW.repeat(3))
+            if folder_path not in paths_by_depth[depth]:
+                depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, depth_options)
+                match in_action:
+                    case MenuActions.SKIP:
+                        continue
+                    case MenuActions.SKIP_ALL:
+                        skip_all = True
+                        break
+                    case MenuActions.INTERUPT:
+                        reload = True
+                        break
+                    case MenuActions.SUCCESS:
+                        paths_added = 0
+                        for depth, folder_path in iter_hierarchy_until_depth(folder_path, depth_input):
+                            paths_by_depth[depth].append(folder_path)
+                            paths_added += 1
+                        total_paths_added += paths_added
+                        print(Icon.DOWNARROW.repeat(3))
+                        print(render_cli_object(cli_objects["infos"], "added", path_count=paths_added))
+                        continue
+            else:
+                print(render_cli_object(cli_objects["infos"], "skipped"))
+                # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new 
+        if skip_all or reload:
+            break
+    if reload:
+        return None, MenuActions.RESTART
+    print(Delimiter.DASH.repeat(80))
+    print(render_cli_object(cli_objects["infos"], "selected", path_count=total_paths_added))
+    print(Icon.DOWNARROW.repeat(3))
+    
+    if total_paths_added == 0:
+        return None, MenuActions.FAILED
+    
+    return paths_by_depth, MenuActions.SUCCESS
 
 # CLI elements
 class MenuActions(StrEnum):
@@ -133,6 +222,7 @@ class MenuActions(StrEnum):
     SKIP_ALL = auto()
     SUCCESS = auto()
     FAILED = auto()
+    RESTART = auto()
 
 class Template:
     SEP_MSG_SEP = "{start}{sep}{msg}{sep}"
@@ -201,10 +291,11 @@ cli_objects = {
             "exit": {"icon": Emoji.CROSSMARK, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to suspend the script"},
             "return_back": {"icon": Emoji.LEFTWARDARROW, "msg": "Press 'Ctrl+C' to go back"},
             "restart": {"icon": Emoji.RESTART, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to cancel current input and retry"},
-            "skip": {"msg": "Type 'skip' to skip folder path"},
+            "skip": {"msg": "Type 'skip' to skip current folder path"},
             "skip_all": {"msg": "Type 'skipall' to skip the rest of folder path(s)"},
             "csv_load": {"msg": "Type 'csv' to load folder path(s) from CSV"},
-            "manual_load": {"msg": "Type 'manual' to provide folder path(s) directly in CLI"}
+            "manual_load": {"msg": "Type 'manual' to provide folder path(s) directly in CLI"},
+            "depth": {"msg": "Select 'depth level' from {depth_range}"}
         }
     },
     "prompts": {
@@ -218,7 +309,6 @@ cli_objects = {
         "elements": {
             "csv": {"msg": "Provide link to CSV file: "},
             "manual": {"msg": "Provide one or several folder path(s) separated with {paths_separator}: "},
-            "depth": {"msg": "Provide 'depth' value from the range {depth_range}: "}
         }
     },
     "warnings": {
@@ -226,13 +316,13 @@ cli_objects = {
         "defaults": {
             "start": "",
             "icon": Emoji.WARNINGSIGN,
-            "sep": Delimiter.SPACE,
+            "sep": Delimiter.SPACE.repeat(2),
             "msg": "empty"
         },
         "elements": {
             "invalid_input": {"msg": "Invalid input"}, # General
             "empty_input": {"msg": "No folder path(s) to process"}, # General
-            "csv_load_failed": {"msg": "CSV loading failed with {error}"}, # CSV
+            "csv_load_failed": {"msg": "CSV loading failed with the reason - {error}"}, # CSV
             "file_not_found": {"msg": "Provided path '{path}' is not a file"}, # File / Extension
             "extension_not_supported": {"msg": "Provided extension '{ext}' is not supported"}, # File / Extension
             "missing_columns": {"msg": "Required columns {cols} are missing"}, # Columns
@@ -249,9 +339,8 @@ cli_objects = {
         "elements": {
             "exit": {"msg": "Script terminated"}, # General
             "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Output ready"},
-            "valid_paths": {"msg": "Valid folder path(s) identified {path_count}"},
-            "duplicated_removed": {"msg": "{path_count} duplicate path(s) removed"},
-            "corrupted_removed": {"msg": "{path_count} corrupted path(s) removed"},
+            "invalid_entries": {"msg": "{path_count} invalid path(s) removed"},
+            "duplicate_entries": {"msg": "{path_count} duplicate path(s) removed"},
             "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {path}"},
             "added": {"msg": "[Added] -----> {path_count} folder path(s)"},
             "skipped": {"msg": "[Skipped] -----> as already in scope"},
@@ -278,21 +367,22 @@ cli_grouped_objects = {
         ("menu_lines", "restart"),
         ("menu_lines", "skip_all"),
         ("menu_lines", "skip"),
+        ("menu_lines", "depth")
     ]
 }
 
-def render_cli_object(object: dict, element: str = None, **runtime_args) -> str:
+def render_cli_object(cli_object: dict, element_name: str = None, **runtime_args) -> str:
     # Validate CLI object dict
-    assert isinstance(object, dict), f"CLI object should be a dictionary, {type(object)} provided instead"
-    assert "template" in object, "Template is missing"
-    assert "defaults" in object, "Defaults is missing"
-    assert "elements" in object, "Elements is missing"
+    assert isinstance(cli_object, dict), f"CLI object should be a dictionary, {type(cli_object)} provided instead"
+    assert "template" in cli_object, "Template is missing"
+    assert "defaults" in cli_object, "Defaults is missing"
+    assert "elements" in cli_object, "Elements is missing"
     # Unpack CLI assets
-    template = object.get("template")
-    elements = object.get("elements")
+    template = cli_object.get("template", {})
+    elements = cli_object.get("elements", {})
     # Merge default and element configurations
-    element_config = elements.get(element, {})
-    default_config = object.get("defaults", {})
+    element_config = elements.get(element_name, {})
+    default_config = cli_object.get("defaults", {})
     merged_config = {**default_config, **element_config}
     # Validate template placeholders
     template_args = get_placeholders(template)
@@ -308,11 +398,12 @@ def render_cli_object(object: dict, element: str = None, **runtime_args) -> str:
     final_element = template.format(**merged_config)
     return final_element
 
-def render_cli_grouped_object(grouped_object: dict, objects:dict) -> str:
+def render_cli_grouped_object(cli_grouped_object: dict, cli_objects: dict, **runtime_args) -> str: # hardcoded "\n"
     rendered_objects = []
-    for object_config in grouped_object:
-        object_name, element = object_config
-        rendered_object = render_cli_object(objects[object_name], element)
+    for cli_object_config in cli_grouped_object:
+        object_name, element_name = cli_object_config
+        cli_object = cli_objects.get(object_name, {})
+        rendered_object = render_cli_object(cli_object, element_name, **runtime_args)
         rendered_objects.append(rendered_object)
     return "\n".join(rendered_objects)
 
@@ -324,12 +415,10 @@ def prompt_user(prompt: str)-> Tuple[str | None, MenuActions | None]:
         return None, MenuActions.INTERUPT
 
 def main_loop(cli_grouped_objects, cli_objects): # 1st level
-    
     input_handler = {
         "csv": csv_loop,
         "manual": manual_loop,
     }
-
     while True:
         # Request user input
         print(render_cli_grouped_object(cli_grouped_objects["main_menu"], cli_objects))
@@ -337,38 +426,27 @@ def main_loop(cli_grouped_objects, cli_objects): # 1st level
         match action:
             case MenuActions.SUCCESS:
                 user_input = lower_text(strip_text(user_input))
+                #  User input handling
+                handler = input_handler.get(user_input)
+                if not handler:
+                    print(render_cli_object(cli_objects["warnings"], "invalid_input"))
+                    continue
+                loop_func = handler
+                paths_by_depth, in_action = loop_func(cli_grouped_objects, cli_objects)
+                # Loop control parameters check
+                match in_action:
+                    case MenuActions.INTERUPT:
+                        continue
+                    case MenuActions.SUCCESS:
+                        print(render_cli_object(cli_objects["infos"], "output_ready"))
+                        return paths_by_depth
             case MenuActions.INTERUPT:
                 print()
+                print(Icon.DOWNARROW.repeat(3))
                 print(render_cli_object(cli_objects["infos"], "exit"))
                 break
 
-        #  User input handling
-        handler = input_handler.get(user_input)
-
-        if not handler:
-            print(render_cli_object(cli_objects["warnings"], "invalid_input"))
-            continue
-        
-        loop_func = handler
-        folder_scope, in_action = loop_func(cli_grouped_objects, cli_objects)
-
-        # Loop control parameters check
-        match in_action:
-            case MenuActions.INTERUPT:
-                continue
-            case MenuActions.FAILED:
-                print(render_cli_object(cli_objects["warnings"], "empty_input"))
-                continue
-            case MenuActions.SUCCESS:
-                print(render_cli_object(cli_objects["infos"], "output_ready"))
-                return folder_scope
-
-def csv_loop(cli_grouped_objects, cli_objects): # 2nd level
-    
-    # Required CSV columns for correct input validation
-    required_col1 = "FolderPath"
-    test_req1 = "FolderPathTest"
-    
+def csv_loop(cli_grouped_objects, cli_objects): # 2nd level    
     while True:
         # Request user input
         print(render_cli_grouped_object(cli_grouped_objects["csv_menu"], cli_objects))
@@ -376,104 +454,39 @@ def csv_loop(cli_grouped_objects, cli_objects): # 2nd level
         match action:
             case MenuActions.SUCCESS:
                 user_input = strip_text(user_input)
+                # Check whether provided link is file, otherwise continue
+                if not is_file(user_input):
+                    print(render_cli_object(cli_objects["warnings"], "file_not_found", path=user_input))
+                    continue
+                # Check whether file extension == 'csv', otherwise continue
+                if not has_valid_extension(user_input, '.csv'):
+                    print(render_cli_object(cli_objects["warnings"], "extension_not_supported", ext=user_input))
+                    continue
+                # Open CSV file as dataframe
+                raw_data, e = open_csv(user_input)
+                if e:
+                    print(render_cli_object(cli_objects["warnings"], "csv_load_failed", error=e))
+                    continue
+                if not has_required_cols(raw_data):
+                    print(render_cli_object(cli_objects["warnings"], "missing_columns", cols="FolderPath"))
+                    continue
+                # Get paths by depths
+                paths_by_depth, in_action = get_paths_by_depth(raw_data)
+                match in_action:
+                    case MenuActions.RESTART:
+                        continue
+                    case MenuActions.FAILED:
+                        print(render_cli_object(cli_objects["warnings"], "empty_input"))
+                        continue
+                    case MenuActions.SUCCESS:
+                        return paths_by_depth, MenuActions.SUCCESS
             case MenuActions.INTERUPT:
                 print()
                 return None, MenuActions.INTERUPT
-        
-        # Check whether provided link is file, otherwise continue
-        if not is_file(user_input):
-            print(render_cli_object(cli_objects["warnings"], "file_not_found", path=user_input))
-            continue
-        # Check whether file extension == 'csv', otherwise continue
-        file_ext = get_file_extension(user_input)
-        file_ext = lower_text(strip_text(file_ext))
-        if file_ext != '.csv':
-            print(render_cli_object(cli_objects["warnings"], "extension_not_supported", ext=file_ext))
-            continue
-        # Open CSV file as dataframe
-        raw_data, e = open_csv(user_input)
-        if e:
-            print(render_cli_object(cli_objects["warnings"], "csv_load_failed", error=e))
-            continue
-        # Validate CSV columns
-        if required_col1 not in raw_data.columns:
-            print(render_cli_object(cli_objects["warnings"], "missing_columns", cols=required_col1))
-            continue
-        # ↓↓↓ same in manual
-        # Validate CSV data
-        raw_data[test_req1] = raw_data[required_col1].apply(lambda x: True if is_folder(x) else False)
-        # Normalize CSV data
-        normalized_data = remove_duplicates(raw_data, column_name=required_col1)
-        duplicates_count = raw_data.shape[0] - normalized_data.shape[0]
-        if duplicates_count:
-            print(render_cli_object(cli_objects["infos"], "duplicated_removed", path_count=duplicates_count))
-        # Select valid entries
-        condition = normalized_data[test_req1] == True
-        path_data = filter_df(normalized_data, condition)
-        if path_data.empty:
-            print(render_cli_object(cli_objects["warnings"], "empty_input"))
-            continue
-        # Enrich path data
-        path_data["FolderPathDepth"] = path_data[required_col1].apply(lambda x: get_path_depth(x))
-        path_data["BranchMaxDepth"] = path_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
-        # Define depth and resolve parent-child relationship
-        max_depth = path_data["BranchMaxDepth"].max()
-        paths_by_depth = {depth: [] for depth in range(1, max_depth + 1)}
-        depths = sorted(list(set(path_data["FolderPathDepth"])))
-        skip_all = False
-        reload = False
-        total_paths_added = 0
-        for depth in depths:
-            temp_data = path_data.loc[path_data["FolderPathDepth"] == depth]
-            for idx in temp_data.index:
-                folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
-                max_depth = temp_data.loc[idx, "BranchMaxDepth"]
-                depth_options = [depth for depth in range(depth, max_depth + 1)]
-                print(Delimiter.DASH.repeat(80))
-                print(render_cli_object(cli_objects["infos"], "processing", path=folder_path))
-                print(Icon.DOWNARROW.repeat(3))
-                if folder_path not in paths_by_depth[depth]:
-                    depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, depth_options)
-                    match in_action:
-                        case MenuActions.SKIP:
-                            continue
-                        case MenuActions.SKIP_ALL:
-                            skip_all = True
-                            break
-                        case MenuActions.INTERUPT:
-                            reload = True
-                            break
-                        case MenuActions.SUCCESS:
-                            paths_added = 0
-                            for depth, folder_path in iter_hierarchy_until_depth(folder_path, depth_input):
-                                paths_by_depth[depth].append(folder_path)
-                                paths_added += 1
-                            total_paths_added += paths_added
-                            print(Icon.DOWNARROW.repeat(3))
-                            print(render_cli_object(cli_objects["infos"], "added", path_count=paths_added))
-                            continue
-                else:
-                    print(render_cli_object(cli_objects["infos"], "skipped"))
-                    # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new 
-            if skip_all or reload:
-                break
-        if reload:
-            continue
-        print(Delimiter.DASH.repeat(80))
-        print(render_cli_object(cli_objects["infos"], "selected", path_count=total_paths_added))
-        print(Icon.DOWNARROW.repeat(3))
-        
-        if total_paths_added == 0:
-            return paths_by_depth, MenuActions.FAILED
-        
-        return paths_by_depth, MenuActions.SUCCESS
 
-def manual_loop(cli_grouped_objects, cli_objects): # 2nd level
-    
+def manual_loop(cli_grouped_objects, cli_objects): # 2nd level # hardcoded ","
     # Separator to parse user input
     separator = ","
-    required_col1 = "FolderPath"
-    test_req1 = "FolderPathTest"
 
     while True:
         # Request user input
@@ -481,112 +494,49 @@ def manual_loop(cli_grouped_objects, cli_objects): # 2nd level
         user_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "manual", paths_separator=separator))
         match action:
             case MenuActions.SUCCESS:
-                user_input = strip_text(user_input)
+                raw_data = pd.DataFrame({"FolderPath": split_text(strip_text(user_input), separator)})
+                # Get paths by depths
+                paths_by_depth, in_action = get_paths_by_depth(raw_data)
+                match in_action:
+                    case MenuActions.RESTART:
+                        continue
+                    case MenuActions.FAILED:
+                        print(render_cli_object(cli_objects["warnings"], "empty_input"))
+                        continue
+                    case MenuActions.SUCCESS:
+                        return paths_by_depth, MenuActions.SUCCESS
             case MenuActions.INTERUPT:
                 print()
                 return None, MenuActions.INTERUPT
-        
-        # Parse user input
-        folder_paths = split_text(user_input, separator)
-        raw_data = pd.DataFrame({required_col1: folder_paths})
-        # ↓↓↓ same in csv
-        # Validate CSV data
-        raw_data[test_req1] = raw_data[required_col1].apply(lambda x: True if is_folder(x) else False)
-        # Normalize CSV data
-        normalized_data = remove_duplicates(raw_data, column_name=required_col1)
-        duplicates_count = raw_data.shape[0] - normalized_data.shape[0]
-        if duplicates_count:
-            print(render_cli_object(cli_objects["infos"], "duplicated_removed", path_count=duplicates_count))
-        # Select valid entries
-        condition = normalized_data[test_req1] == True
-        path_data = filter_df(normalized_data, condition)
-        if path_data.empty:
-            print(render_cli_object(cli_objects["warnings"], "empty_input"))
-            continue
-        # Enrich path data
-        path_data["FolderPathDepth"] = path_data[required_col1].apply(lambda x: get_path_depth(x))
-        path_data["BranchMaxDepth"] = path_data[required_col1].apply(lambda x: get_max_depth_from_path(x))
-        # Define depth and resolve parent-child relationship
-        max_depth = path_data["BranchMaxDepth"].max()
-        paths_by_depth = {depth: [] for depth in range(1, max_depth + 1)}
-        depths = sorted(list(set(path_data["FolderPathDepth"])))
-        skip_all = False
-        reload = False
-        total_paths_added = 0
-        for depth in depths:
-            temp_data = path_data.loc[path_data["FolderPathDepth"] == depth]
-            for idx in temp_data.index:
-                folder_path = strip_text(temp_data.loc[idx, "FolderPath"], char_to_remove=os.sep)
-                max_depth = temp_data.loc[idx, "BranchMaxDepth"]
-                depth_options = [depth for depth in range(depth, max_depth + 1)]
-                print(Delimiter.DASH.repeat(80))
-                print(render_cli_object(cli_objects["infos"], "processing", path=folder_path))
-                print(Icon.DOWNARROW.repeat(3))
-                if folder_path not in paths_by_depth[depth]:
-                    depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, depth_options)
-                    match in_action:
-                        case MenuActions.SKIP:
-                            continue
-                        case MenuActions.SKIP_ALL:
-                            skip_all = True
-                            break
-                        case MenuActions.INTERUPT:
-                            reload = True
-                            break
-                        case MenuActions.SUCCESS:
-                            paths_added = 0
-                            for depth, folder_path in iter_hierarchy_until_depth(folder_path, depth_input):
-                                paths_by_depth[depth].append(folder_path)
-                                paths_added += 1
-                            total_paths_added += paths_added
-                            print(Icon.DOWNARROW.repeat(3))
-                            print(render_cli_object(cli_objects["infos"], "added", path_count=paths_added))
-                            continue
-                else:
-                    print(render_cli_object(cli_objects["infos"], "skipped"))
-                    # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new 
-            if skip_all or reload:
-                break
-        if reload:
-            continue
-        print(Delimiter.DASH.repeat(80))
-        print(render_cli_object(cli_objects["infos"], "selected", path_count=total_paths_added))
-        print(Icon.DOWNARROW.repeat(3))
-        
-        if total_paths_added == 0:
-            return paths_by_depth, MenuActions.FAILED
-        
-        return paths_by_depth, MenuActions.SUCCESS
 
 def depth_loop(cli_grouped_objects, cli_objects, depth_options): # 3rd level
 
     while True:
         # Request user input
-        print(render_cli_grouped_object(cli_grouped_objects["depth_menu"], cli_objects))
-        depth_input, action = prompt_user(render_cli_object(cli_objects["prompts"], "depth", depth_range=depth_options))
+        print(render_cli_grouped_object(cli_grouped_objects["depth_menu"], cli_objects, depth_range=depth_options))
+        depth_input, action = prompt_user(render_cli_object(cli_objects["prompts"]))
         match action:
             case MenuActions.SUCCESS:
                 depth_input = lower_text(strip_text(depth_input))
+                if depth_input == "skip":
+                    return None, MenuActions.SKIP
+                elif depth_input == "skipall":
+                    return None, MenuActions.SKIP_ALL
+
+                try:
+                    depth_input = int(depth_input)
+                    if depth_input in depth_options:
+                        return depth_input, MenuActions.SUCCESS
+                    else:
+                        print(render_cli_object(cli_objects["warnings"], "invalid_input"))
+                        continue
+                except ValueError:
+                    print(render_cli_object(cli_objects["warnings"], "invalid_input"))
             case MenuActions.INTERUPT:
                 print()
                 return None, MenuActions.INTERUPT
 
-        if depth_input == "skip":
-            return None, MenuActions.SKIP
-        elif depth_input == "skipall":
-            return None, MenuActions.SKIP_ALL
-
-        try:
-            depth_input = int(depth_input)
-            if depth_input in depth_options:
-                return depth_input, MenuActions.SUCCESS
-            else:
-                print(render_cli_object(cli_objects["warnings"], "invalid_input"))
-                continue
-        except ValueError:
-            print(render_cli_object(cli_objects["warnings"], "invalid_input"))
-
 if __name__ == "__main__":
     paths_by_depth = main_loop(cli_grouped_objects, cli_objects)
-    # if paths_by_depth:
-    #     print(paths_by_depth)
+    if paths_by_depth:
+        print(paths_by_depth)
