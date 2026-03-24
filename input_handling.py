@@ -1,6 +1,9 @@
+
 from enum import StrEnum, auto
-import inspect
 import os
+os.environ["DISABLE_PANDERA_IMPORT_WARNING"] = "True"
+import pandera as pa
+from pandera.typing import Series
 import pandas as pd
 from pandas.errors import ParserError, EmptyDataError
 from string import Formatter
@@ -18,115 +21,137 @@ class EmptyDataError(Exception):
 class MissingColumnError(Exception):
     pass
 # Schema
-class PathSchema:
-    PATH = "FolderPath"
-    IS_INVALID = "isInvalid"
-    IS_DUPLICATE = "isDuplicate"
-    PATH_DEPTH_FROM_ROOT = "PathDepthFromRoot"
-    BRANCH_DEPTH_FROM_ROOT = "BranchDepthFromRoot"
-    BRANCH_DEPTH_FROM_PATH = "BranchDepthFromPath"
-    REQUIRED = [PATH]
-class PathData:
-    def __init__(self, path_data: pd.DataFrame, required_cols: list):
-        # Type check
-        if not isinstance(path_data, pd.DataFrame):
-            raise TypeError("path_data must be a pandas DataFrame")
-        # Content check
-        if self.is_empty(path_data):
-            raise EmptyDataError("path_data is empty")
-        # Column check
-        if not self.has_columns(path_data, required_cols):
-            missing = self.missing_columns(path_data, required_cols)
-            raise MissingColumnError(f"Required columns {missing} are missing")
-        # Attributes
-        self.path_data = path_data.copy() # mutates as per applied methods
-        self._trace = []
-        # Normalize data and store trace log
-        self._mark_invalid()
-        self._filter_by_column(PathSchema.IS_INVALID, filter_by_flag=False)
-        self._mark_duplicates()
-        self._filter_by_column(PathSchema.IS_DUPLICATE, filter_by_flag=False)
+class PathDataSchema(pa.DataFrameModel):
+    FolderPath: Series[str] = pa.Field(coerce=True)
+    isInvalid: Series[bool] = pa.Field(default=False)
+    isDuplicate: Series[bool] = pa.Field(default=False)
+    PathDepth: Series[int] = pa.Field(default=-1)
+    BranchDepth: Series[int] = pa.Field(default=-1)
+    BranchDepthFromPath: Series[int] = pa.Field(default=-1)
+    
+    class Config:
+        strict = True
+        coerce = True
 
+    @classmethod
+    def columns(cls):
+        return cls.to_schema().columns.keys()
+    
+    @pa.dataframe_parser
+    def sort_by_depth(cls, df: pd.DataFrame) -> pd.DataFrame:
+        return df.sort_values(cls.PathDepth, ascending=True)
+class PathData:
+    def __init__(self, schema: PathDataSchema):
+        # Load schema
+        self.schema = schema
+        # Init empty dataframe
+        self.path_df = pd.DataFrame(columns=self.schema.columns())
+        # Init policy
+        self.exclude_policy = {}
+        # Log report storage
+        self._trace = []
+        # Step tracker
+        self._steps_completed = set()
+    
     @property
     def data(self): # could not be named df only if i rename attr to _df
-        return self.path_data
+        return self.schema.validate(self.path_df)
     @property
-    def max_depth(self):
-        if not self.has_columns(self.path_data, PathSchema.BRANCH_DEPTH_FROM_ROOT):
-            raise MissingColumnError(f"{PathSchema.BRANCH_DEPTH_FROM_ROOT} depth has not been calculated")
-        return self.path_data[PathSchema.BRANCH_DEPTH_FROM_ROOT].max()
+    def valid_data(self):
+        return self.schema.validate(self.path_df.loc[self._active_mask])
+    @property
+    def _active_mask(self):
+        '''Dynamically builds a mask'''
+        mask = pd.Series(True, index=self.path_df.index)
+        for col_name, status in self.exclude_policy.items():
+            if status:
+                mask &= (~self.path_df[col_name])
+        return mask
 
     def _log(self, action, details=None):
         self._trace.append({
             "action": action,
             "details": details or {},
-            "rows_after": self.path_data.shape[0],
+            "rows_after": self.path_df.shape[0],
             "timestamp": time.time()
         })
+
+    def load(self, paths: list):
+        if not paths:
+            raise EmptyDataError("No data to process")
+        if not isinstance(paths, list):
+            raise TypeError("paths should be a list")
+        # Load paths 
+        self.path_df[self.schema.FolderPath] = paths
+        # Log trace
+        self._steps_completed.add("LOAD")
+        # TBA
+        return self
+    
+    def normalize(self, exclude_invalids=True, exclude_duplicates=True):
+        if "LOAD" not in self._steps_completed:
+            raise RuntimeError("You must call .load() before .normalize()")
+        # Mark invalid folders
+        (
+            self
+            ._mark_invalid()
+            ._mark_duplicates()
+        )
         
+        # Envoke exclude policy
+        self.exclude_policy[self.schema.isInvalid] = exclude_invalids
+        self.exclude_policy[self.schema.isDuplicate] = exclude_duplicates
+        # Write a step
+        self._steps_completed.add("NORMALIZED")
+        return self
+
+    def add_hierarchy_depth_data(self):
+        if "NORMALIZED" not in self._steps_completed:
+            raise RuntimeError("You must call .normalize() before to add_hierarchy_depth_data()")
+        if not self._active_mask.any():
+            raise EmptyDataError
+        (
+            self
+            ._add_path_depth()
+            ._add_branch_depth()
+            ._add_branch_depth_from_path()
+        )
+        self._steps_completed.add("DEPTH_ADDED")
+
+        return self
+    
     def _mark_invalid(self):
-        self.data[PathSchema.IS_INVALID] = self.data[PathSchema.PATH].apply(is_not_folder)
-        num_invalids = self.data[PathSchema.IS_INVALID].sum()
+        self.path_df[self.schema.isInvalid] = self.path_df[self.schema.FolderPath].apply(is_not_folder)
+        num_invalids = self.path_df[self.schema.isInvalid].sum()
         self._log("mark_invalids", {"count": int(num_invalids)})
         return self
 
     def _mark_duplicates(self):
-        self.path_data[PathSchema.IS_DUPLICATE] = self.path_data.duplicated(subset=PathSchema.PATH)
-        num_duplicates = self.path_data[PathSchema.IS_DUPLICATE].sum()
+        self.path_df[self.schema.isDuplicate] = self.path_df.duplicated(subset=self.schema.FolderPath)
+        num_duplicates = self.path_df[self.schema.isDuplicate].sum()
         self._log("mark_duplicates", {"count": int(num_duplicates)})
         return self
 
-    def _filter_by_column(self, col_name, filter_by_flag=True):
-        if self.is_empty(self.path_data):
-            raise EmptyDataError
-        if not self.has_columns(self.path_data, col_name):
-            missing = self.missing_columns(self.path_data, col_name)
-            raise MissingColumnError(f"Required columns {missing} are missing")
-        rows_before = self.path_data.shape[0]
-        condition = self.path_data[col_name] if filter_by_flag else ~self.path_data[col_name]
-        self.path_data = self.path_data.loc[condition]
-        removed = rows_before - self.path_data.shape[0]
-        log_action = func_name() + " " + col_name
-        self._log(log_action, {"filtered": int(removed)})
-        return 
-
-    def calculate_hierarchy_depths(self):
-        if self.is_empty(self.path_data):
-            raise EmptyDataError("Provided data is empty")
-        self.path_data[PathSchema.PATH_DEPTH_FROM_ROOT] = self.path_data[PathSchema.PATH].apply(get_path_depth)
-        self.path_data[PathSchema.BRANCH_DEPTH_FROM_ROOT] = self.path_data[PathSchema.PATH].apply(get_branch_depth_from_root)
-        self.path_data[PathSchema.BRANCH_DEPTH_FROM_PATH] = self.path_data[PathSchema.BRANCH_DEPTH_FROM_ROOT] - self.path_data[PathSchema.PATH_DEPTH_FROM_ROOT]
-        self._log("calculate_depths")
+    def _add_path_depth(self):
+        self.path_df.loc[self._active_mask, self.schema.PathDepth] = self.path_df.loc[self._active_mask, self.schema.FolderPath].apply(get_path_depth)
+        self._log("add_path_depth")
         return self
 
-    def sort_by(self, by_col):
-        if self.is_empty(self.path_data):
-            raise EmptyDataError("Provided data is empty")
-        if not self.has_columns(self.path_data, by_col):
-            missing = self.missing_columns(self.path_data, by_col)
-            raise MissingColumnError(f"Required columns {missing} are missing")
-        self.path_data = self.path_data.sort_values(by=by_col)
+    def _add_branch_depth(self):
+        self.path_df.loc[self._active_mask, self.schema.BranchDepth] = self.path_df.loc[self._active_mask, self.schema.FolderPath].apply(get_branch_depth_from_root)
+        self._log("add_branch_depth")
+        return self
+
+    def _add_branch_depth_from_path(self):
+        self.path_df.loc[self._active_mask, self.schema.BranchDepthFromPath] = self.path_df.loc[self._active_mask, self.schema.BranchDepth] - self.path_df.loc[self._active_mask, self.schema.PathDepth]
+        self._log("add_branch_depth_from_path")
         return self
 
     def get_report(self):
         for line in self._trace:
             print(Delimiter.DASH.repeat(80))
-            print(f"{line["action"]} accomplished {line["details"]}")
+            print(f"{line["action"]} {line["details"]} accomplished at {line["timestamp"]}")
         return self
-
-    @staticmethod
-    def has_columns(path_data: pd.DataFrame, cols: list | str) -> bool:
-        if isinstance(cols, str):
-            cols = [cols]
-        return set(cols).issubset(path_data.columns)
-    @staticmethod
-    def missing_columns(path_data: pd.DataFrame, cols: list | str) -> set:
-        if isinstance(cols, str):
-            cols = [cols]        
-        return set(cols) - set(path_data.columns)
-    @staticmethod
-    def is_empty(path_data: pd.DataFrame) -> bool:
-        return path_data.empty
 # Actions
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -223,6 +248,7 @@ cli_objects = {
         "elements": {
             "csv": {"msg": "Enter link to CSV file: "},
             "manual": {"msg": "Enter folder path: "},
+            "manual_additional": {"msg": "Enter another folder path: "},
         }
     },
     "warning": {
@@ -237,9 +263,8 @@ cli_objects = {
             "invalid_input": {"msg": "Invalid input"}, # General
             "empty_input": {"msg": "No folder path(s) to process"}, # General
             "csv_load_failed": {"msg": "CSV loading failed with the reason - {error}"}, # CSV
-            # "file_not_found": {"msg": "Provided path '{path}' is not a file"}, # File / Extension
+            "path_data_processing_failed": {"msg": "Path data processing failed with the reason - {error}"}, # Path data
             "ext_not_supported": {"msg": "File extension '{ext}' is not supported"}, # File / Extension
-            # "missing_columns": {"msg": "Required columns {cols} are missing"}, # Columns
         }
     },
     "info": {
@@ -287,11 +312,6 @@ input_args = {
     "csv": ("csv_menu", "csv"),
     "manual": ("manual_menu", "manual")
 }
-
-## Inspect helpers
-
-def func_name():
-    return inspect.stack()[1].function
 
 ## String helpers
 
@@ -399,11 +419,11 @@ def get_branch_depth_from_root(path: str) -> tuple[int, int]:
 def iter_hierarchy_until(path: str, max_depth: int) -> Iterator[tuple[int, str]]:
     if is_not_folder(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a folder")
-    for root_path, folders , _ in os.walk(path):
+    for root_path, folders , files in os.walk(path):
         current_depth = get_path_depth(root_path)
         if current_depth >= max_depth:
             folders[:] = []
-        yield current_depth, root_path
+        yield current_depth, root_path, files
 
 ## DF helpers
 
@@ -469,11 +489,10 @@ def main_loop(cli_grouped_objects: dict, cli_objects: dict, input_args: dict): #
             break
         # User input handling
         args = input_args.get(user_input)
-        menu_name, prompt_name = args
         if not args:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             continue
-        paths_by_dist_from_root, in_action = input_loop(cli_grouped_objects, cli_objects, menu_name, prompt_name)
+        paths_by_dist_from_root, in_action = input_loop(cli_grouped_objects, cli_objects, *args)
         # Loop control parameters check
         match in_action:
             case MenuActions.INTERUPT:
@@ -486,6 +505,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
     while True:
         # Render menu
         print(render_cli_grouped_object(cli_grouped_objects[menu_name], cli_objects))
+        folder_paths = []
         # Open CSV
         if menu_name == "csv_menu":
             # Request user input
@@ -497,50 +517,56 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
             # Open CSV
             try:
                 raw_data = open_csv(user_input)
+                if PathDataSchema.FolderPath in raw_data:
+                    folder_paths = raw_data[PathDataSchema.FolderPath].to_list()
             except (FileNotFoundError, ValueError, PermissionError, ParserError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
         elif menu_name == "manual_menu":
             # Request user input
             try:
-                folder_paths = []
                 while True:
-                    user_input = input(render_cli_object(cli_objects["prompt"], prompt_name))
+                    if len(folder_paths) == 0:
+                        user_input = input(render_cli_object(cli_objects["prompt"], prompt_name))
+                    else:
+                        user_input = input(render_cli_object(cli_objects["prompt"], "manual_additional"))
                     user_input = strip_text(user_input)
-                    folder_paths.append(user_input)
                     if user_input == "stop":
                         break
+                    folder_paths.append(user_input)
             except KeyboardInterrupt:
                 return None, MenuActions.INTERUPT
-            # Create DF
-            raw_data = pd.DataFrame({"FolderPath": folder_paths})
-        # Normalize and enrich path data
+        # Load, normalize and enrich path data
         try:
             processor = (
-                PathData(raw_data, PathSchema.REQUIRED)
-                .calculate_hierarchy_depths()
-                .sort_by(PathSchema.PATH_DEPTH_FROM_ROOT)
-                .get_report()
+                PathData(PathDataSchema)
+                .load(folder_paths)
+                .normalize()
+                .add_hierarchy_depth_data()
             )
-        except EmptyDataError:
-            print(render_cli_object(cli_objects["warning"], "empty_input"))
+        except (EmptyDataError, RuntimeError) as e:
+            print(render_cli_object(cli_objects["warning"], "path_data_processing_failed", error=e))
             continue
         # Get paths by dist from root
-        path_data = processor.data
-        max_depth = processor.max_depth
-        paths_by_dist_from_root = {depth: [] for depth in range(0, max_depth + 1)}
+        path_data = processor.valid_data
+        print(path_data)
+        max_depth = path_data[PathDataSchema.BranchDepth].max()
+        folders_by_dist_from_root = {depth: [] for depth in range(0, max_depth + 1)}
+        files_by_dist_from_root = {depth: [] for depth in range(0, max_depth + 1)}
         # Resolve parent-child relationship
         reload = False
-        total_paths_added = 0
+        total_folders_added = 0
+        total_files_added = 0
         for _, row in path_data.iterrows():
-            folder_path = strip_text(row[PathSchema.PATH], char_to_remove=os.sep)
-            path_depth = row[PathSchema.PATH_DEPTH_FROM_ROOT]
-            branch_depth = row[PathSchema.BRANCH_DEPTH_FROM_PATH]
+            # folder_path = strip_text(row[PathDataSchema.FolderPath], char_to_remove=os.sep)
+            folder_path = row[PathDataSchema.FolderPath]
+            path_depth = row[PathDataSchema.PathDepth]
+            branch_depth_from_path = row[PathDataSchema.BranchDepthFromPath]
             print(Delimiter.DASH.repeat(80))
             print(render_cli_object(cli_objects["info"], "processing", path=folder_path))
             print(Icon.DOWNARROW.repeat(3))
-            if folder_path not in paths_by_dist_from_root[path_depth]:
-                depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth)
+            if folder_path not in folders_by_dist_from_root[path_depth]:
+                depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth_from_path)
                 match in_action:
                     case MenuActions.SKIP:
                         continue
@@ -550,13 +576,18 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
                         reload = True
                         break
                     case MenuActions.SUCCESS:
-                        paths_added = 0
-                        for depth, folder_path in iter_hierarchy_until(folder_path, depth_input):
-                            paths_by_dist_from_root[depth].append(folder_path)
-                            paths_added += 1
-                        total_paths_added += paths_added
+                        folders_added = 0
+                        files_added = 0
+                        for depth, folder_path, files in iter_hierarchy_until(folder_path, depth_input):
+                            folders_by_dist_from_root[depth].append(folder_path)
+                            files_by_dist_from_root[depth].extend(files)
+                            folders_added += 1
+                            files_added += len(files)
+                        total_folders_added += folders_added
+                        total_files_added += files_added
                         print(Icon.DOWNARROW.repeat(3))
-                        print(render_cli_object(cli_objects["info"], "added", path_count=paths_added))
+                        print(render_cli_object(cli_objects["info"], "added", path_count=folders_added))
+                        print(render_cli_object(cli_objects["info"], "added", path_count=files_added))
                         continue
             else:
                 print(render_cli_object(cli_objects["info"], "skipped"))
@@ -564,13 +595,14 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
         if reload:
             return None, MenuActions.RESTART
         print(Delimiter.DASH.repeat(80))
-        print(render_cli_object(cli_objects["info"], "selected", path_count=total_paths_added))
+        print(render_cli_object(cli_objects["info"], "selected", path_count=total_folders_added))
+        print(render_cli_object(cli_objects["info"], "selected", path_count=total_files_added))
         print(Icon.DOWNARROW.repeat(3))
         
-        if total_paths_added == 0:
+        if total_folders_added == 0:
             return None, MenuActions.FAILED
         
-        return paths_by_dist_from_root, MenuActions.SUCCESS
+        return files_by_dist_from_root, MenuActions.SUCCESS
 
 def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth): # 3rd level
     while True:
@@ -591,7 +623,7 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth): # 3r
         else:
             try:
                 user_input = int(user_input)
-                if user_input <= branch_depth:
+                if 0 <= user_input <= branch_depth:
                     return user_input, MenuActions.SUCCESS
                 else:
                     print(render_cli_object(cli_objects["warning"], "invalid_input"))
@@ -601,5 +633,10 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth): # 3r
 
 if __name__ == "__main__":
     paths_by_dist_from_root = main_loop(cli_grouped_objects, cli_objects, input_args)
+    result = []
+    for files in paths_by_dist_from_root.values():
+        result.extend(files)
+    files_df = pd.DataFrame({"Files": result})
+    files_df.to_excel("files.xlsx")
     # if paths_by_dist_from_root:
     #     print(paths_by_dist_from_root)
