@@ -1,4 +1,3 @@
-
 from enum import StrEnum, auto
 import os
 os.environ["DISABLE_PANDERA_IMPORT_WARNING"] = "True"
@@ -8,142 +7,160 @@ import pandas as pd
 from pandas.errors import ParserError, EmptyDataError
 from string import Formatter
 import time
-from typing import Optional, Iterable, Iterator
+from tqdm import tqdm
+from typing import Optional, Iterable, Iterator, List, Tuple
 
 # To improve:
 # instead of os.walk(), create recursion based on os.scandir()
-# auto alignment of header object between separators
-# convert paths by depth ito 1 list
+# self-reporting improvement
+# review paths extraction after open_csv()
 
 # Custom Errors
 class EmptyDataError(Exception):
     pass
-class MissingColumnError(Exception):
-    pass
 # Schema
-class PathDataSchema(pa.DataFrameModel):
-    FolderPath: Series[str] = pa.Field(coerce=True)
+class DirPathSchema(pa.DataFrameModel):
+    DirPath: Series[str] = pa.Field(coerce=True)
     isInvalid: Series[bool] = pa.Field(default=False)
     isDuplicate: Series[bool] = pa.Field(default=False)
-    PathDepth: Series[int] = pa.Field(default=-1)
+    DirDepth: Series[int] = pa.Field(default=-1)
     BranchDepth: Series[int] = pa.Field(default=-1)
-    BranchDepthFromPath: Series[int] = pa.Field(default=-1)
+    BranchDepthFromDir: Series[int] = pa.Field(default=-1)
+    # cccc: Series[int] = pa.Field(default=-1)
     
     class Config:
         strict = True
         coerce = True
 
     @classmethod
-    def columns(cls):
+    def cols(cls):
         return cls.to_schema().columns.keys()
-    
+    @classmethod
+    def col_dtype(cls, col_name):
+        return cls.to_schema().columns[col_name].dtype.type
     @pa.dataframe_parser
     def sort_by_depth(cls, df: pd.DataFrame) -> pd.DataFrame:
-        return df.sort_values(cls.PathDepth, ascending=True)
-class PathData:
-    def __init__(self, schema: PathDataSchema):
+        return df.sort_values(cls.DirDepth, ascending=True)
+class DirPathData:
+    def __init__(self, schema: DirPathSchema):
         # Load schema
         self.schema = schema
+        self.schema_cols = schema.cols()
+        self._calc_map = {
+            self.schema.isInvalid: self._mark_invalid,
+            self.schema.isDuplicate: self._mark_duplicates,
+            self.schema.DirDepth: self._add_dir_depth,
+            self.schema.BranchDepth: self._add_branch_depth,
+            self.schema.BranchDepthFromDir: self._add_branch_depth_from_dir
+        }
+        self._cols_status = {col: False for col in self.schema_cols}
         # Init empty dataframe
-        self.path_df = pd.DataFrame(columns=self.schema.columns())
-        # Init policy
-        self.exclude_policy = {}
+        self.dir_df: pd.DataFrame = pd.DataFrame(columns=self.schema_cols)
+        # Active mask
+        self._active_mask: Optional[pd.Series] = None
         # Log report storage
-        self._trace = []
-        # Step tracker
-        self._steps_completed = set()
+        self._trace= []
     
     @property
-    def data(self): # could not be named df only if i rename attr to _df
-        return self.schema.validate(self.path_df)
+    def df(self): # could not be named df only if i rename attr to _df
+        return self.schema.validate(self.dir_df)
     @property
-    def valid_data(self):
-        return self.schema.validate(self.path_df.loc[self._active_mask])
+    def active_df(self):
+        return self.schema.validate(self.dir_df.loc[self._active_mask])
     @property
-    def _active_mask(self):
-        '''Dynamically builds a mask'''
-        mask = pd.Series(True, index=self.path_df.index)
-        for col_name, status in self.exclude_policy.items():
-            if status:
-                mask &= (~self.path_df[col_name])
-        return mask
-
-    def _log(self, action, details=None):
-        self._trace.append({
-            "action": action,
-            "details": details or {},
-            "rows_after": self.path_df.shape[0],
-            "timestamp": time.time()
-        })
-
-    def load(self, paths: list):
-        if not paths:
-            raise EmptyDataError("No data to process")
-        if not isinstance(paths, list):
-            raise TypeError("paths should be a list")
-        # Load paths 
-        self.path_df[self.schema.FolderPath] = paths
-        # Log trace
-        self._steps_completed.add("LOAD")
-        # TBA
-        return self
-    
-    def normalize(self, exclude_invalids=True, exclude_duplicates=True):
-        if "LOAD" not in self._steps_completed:
-            raise RuntimeError("You must call .load() before .normalize()")
-        # Mark invalid folders
-        (
-            self
-            ._mark_invalid()
-            ._mark_duplicates()
-        )
-        
-        # Envoke exclude policy
-        self.exclude_policy[self.schema.isInvalid] = exclude_invalids
-        self.exclude_policy[self.schema.isDuplicate] = exclude_duplicates
-        # Write a step
-        self._steps_completed.add("NORMALIZED")
-        return self
-
-    def add_hierarchy_depth_data(self):
-        if "NORMALIZED" not in self._steps_completed:
-            raise RuntimeError("You must call .normalize() before to add_hierarchy_depth_data()")
+    def max_branch_depth(self):
         if not self._active_mask.any():
             raise EmptyDataError
-        (
-            self
-            ._add_path_depth()
-            ._add_branch_depth()
-            ._add_branch_depth_from_path()
-        )
-        self._steps_completed.add("DEPTH_ADDED")
+        return int(self.dir_df.loc[self._active_mask, self.schema.BranchDepth].max())
 
+    def load(self, dir_paths: list):
+        if not dir_paths:
+            raise EmptyDataError("No data to process")
+        if not isinstance(dir_paths, list):
+            raise TypeError("paths should be a list")
+        # Load paths 
+        self.dir_df[self.schema.DirPath] = dir_paths
+        self._sanitize_paths()
+        # Log trace
+        self._cols_status[self.schema.DirPath] = True
+        # Add log
+        return self
+
+    def filter_by(self, rules: List[Tuple[str, bool]] = None):
+        if not self._cols_status[self.schema.DirPath]:
+            raise RuntimeError("You must load dir paths first")
+        mask = pd.Series(True, index=self.dir_df.index)
+        if rules:
+            for col, value_to_exlude in rules:
+                if col not in self.schema_cols:
+                    print(f"Warning: Column '{col}' is not in Schema")
+                    continue
+                if not self.schema.col_dtype(col) == bool:
+                    print(f"Warning: Column '{col}' is not boolean")
+                    continue
+                calc_method = self._calc_map.get(col)
+                if calc_method:
+                    calc_method()
+                mask &= (self.dir_df[col] != value_to_exlude)
+        self._active_mask = mask
+        return self
+
+    def enrich(self, features: List[str]):
+        if not self._cols_status[self.schema.DirPath]:
+            raise RuntimeError("You must load dir paths first")
+        if not self._cols_status[self.schema.isInvalid]:
+            raise RuntimeError("You must filter invalid entries")
+        if not self._active_mask.any():
+            raise EmptyDataError
+        for col in features:
+            calc_method = self._calc_map.get(col)
+            if calc_method:
+                calc_method()
+        return self
+    
+    def _sanitize_paths(self):
+        self.dir_df[self.schema.DirPath] = self.dir_df[self.schema.DirPath].apply(get_normalized_path)
         return self
     
     def _mark_invalid(self):
-        self.path_df[self.schema.isInvalid] = self.path_df[self.schema.FolderPath].apply(is_not_folder)
-        num_invalids = self.path_df[self.schema.isInvalid].sum()
+        if self._cols_status.get(self.schema.isInvalid):
+            return self
+        self.dir_df[self.schema.isInvalid] = self.dir_df[self.schema.DirPath].apply(is_not_dir)
+        num_invalids = self.dir_df[self.schema.isInvalid].sum()
         self._log("mark_invalids", {"count": int(num_invalids)})
+        self._cols_status[self.schema.isInvalid] = True
         return self
 
     def _mark_duplicates(self):
-        self.path_df[self.schema.isDuplicate] = self.path_df.duplicated(subset=self.schema.FolderPath)
-        num_duplicates = self.path_df[self.schema.isDuplicate].sum()
+        if self._cols_status.get(self.schema.isDuplicate):
+            return self
+        self.dir_df[self.schema.isDuplicate] = self.dir_df.duplicated(subset=self.schema.DirPath)
+        self._cols_status[self.schema.isDuplicate] = True
+        num_duplicates = self.dir_df[self.schema.isDuplicate].sum()
         self._log("mark_duplicates", {"count": int(num_duplicates)})
         return self
 
-    def _add_path_depth(self):
-        self.path_df.loc[self._active_mask, self.schema.PathDepth] = self.path_df.loc[self._active_mask, self.schema.FolderPath].apply(get_path_depth)
+    def _add_dir_depth(self):
+        if self._cols_status.get(self.schema.DirDepth):
+            return self
+        self.dir_df.loc[self._active_mask, self.schema.DirDepth] = self.dir_df.loc[self._active_mask, self.schema.DirPath].apply(get_dir_depth)
+        self._cols_status[self.schema.DirDepth] = True
         self._log("add_path_depth")
         return self
 
     def _add_branch_depth(self):
-        self.path_df.loc[self._active_mask, self.schema.BranchDepth] = self.path_df.loc[self._active_mask, self.schema.FolderPath].apply(get_branch_depth_from_root)
+        if self._cols_status.get(self.schema.BranchDepth):
+            return self
+        self.dir_df.loc[self._active_mask, self.schema.BranchDepth] = self.dir_df.loc[self._active_mask, self.schema.DirPath].apply(get_branch_depth_from_root)
+        self._cols_status[self.schema.BranchDepth] = True
         self._log("add_branch_depth")
         return self
 
-    def _add_branch_depth_from_path(self):
-        self.path_df.loc[self._active_mask, self.schema.BranchDepthFromPath] = self.path_df.loc[self._active_mask, self.schema.BranchDepth] - self.path_df.loc[self._active_mask, self.schema.PathDepth]
+    def _add_branch_depth_from_dir(self):
+        if self._cols_status.get(self.schema.BranchDepthFromDir):
+            return self
+        self.dir_df.loc[self._active_mask, self.schema.BranchDepthFromDir] = self.dir_df.loc[self._active_mask, self.schema.BranchDepth] - self.dir_df.loc[self._active_mask, self.schema.DirDepth]
+        self._cols_status[self.schema.BranchDepthFromDir] = True
         self._log("add_branch_depth_from_path")
         return self
 
@@ -152,6 +169,15 @@ class PathData:
             print(Delimiter.DASH.repeat(80))
             print(f"{line["action"]} {line["details"]} accomplished at {line["timestamp"]}")
         return self
+
+    def _log(self, action, details=None):
+        self._trace.append({
+            "action": action,
+            "details": details or {},
+            "rows_after": self.dir_df.shape[0],
+            "timestamp": time.time()
+        })
+
 # Actions
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -163,7 +189,7 @@ class MenuActions(StrEnum):
     RESTART = auto()
 # CLI Elements
 class Template:
-    SEP_MSG_SEP = "{start}{sep}{msg}{sep}" # add space required
+    SEP_MSG_SEP = "{start}{sep}{msg:^{width}}{sep}"
     ICON_SEP_MSG = "{start}{icon}{sep}{msg}"
 class Token:
     def __init__(self, token: str):
@@ -211,10 +237,10 @@ cli_objects = {
             "msg": "empty"
         },
         "elements":{
-            "main": {"sep": Delimiter.DASH.repeat(25), "msg": "Main"},
-            "csv_load": {"sep": Delimiter.DASH.repeat(23), "msg": "CSV load"},
-            "manual_load": {"sep": Delimiter.DASH.repeat(22), "msg": "Manual load"},
-            "depth": {"sep": Delimiter.DASH.repeat(25), "msg": "Depth"}
+            "main": {"sep": Delimiter.DASH.repeat(30), "msg": "Main", "width": 15},
+            "csv_load": {"sep": Delimiter.DASH.repeat(30), "msg": "CSV load", "width": 15},
+            "manual_load": {"sep": Delimiter.DASH.repeat(30), "msg": "Manual load", "width": 15},
+            "depth": {"sep": Delimiter.DASH.repeat(30), "msg": "Depth", "width": 15}
         }
     },
     "menu_line": {
@@ -229,11 +255,11 @@ cli_objects = {
             "exit": {"icon": Emoji.CROSSMARK, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to suspend the script"},
             "cancel": {"icon": Emoji.LEFTWARDARROW, "msg": "Press 'Ctrl+C' to cancel"},
             "restart": {"icon": Emoji.RESTART, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to cancel current input and retry"},
-            "skip": {"msg": "Type 'skip' to skip current folder path"},
-            "skip_all": {"msg": "Type 'skipall' to skip the rest of folder path(s)"},
-            "csv_load": {"msg": "Type 'csv' to load folder path(s) from CSV"},
-            "manual_load": {"msg": "Type 'manual' to provide folder path(s) directly in CLI"},
-            "manual_stop": {"msg": "Type 'stop' to finish adding paths"},
+            "skip": {"msg": "Type 'skip' to skip current dir path"},
+            "skip_all": {"msg": "Type 'skipall' to skip the rest of dir path(s)"},
+            "csv_load": {"msg": "Type 'csv' to load dir path(s) from CSV"},
+            "manual_load": {"msg": "Type 'manual' to provide dir path(s) directly in CLI"},
+            "manual_stop": {"msg": "Type 'stop' to finish adding dir path(s)"},
             "depth": {"msg": "Select 'depth level' from {depth_range}"}
         }
     },
@@ -247,8 +273,8 @@ cli_objects = {
         },
         "elements": {
             "csv": {"msg": "Enter link to CSV file: "},
-            "manual": {"msg": "Enter folder path: "},
-            "manual_additional": {"msg": "Enter another folder path: "},
+            "manual": {"msg": "Enter dir path: "},
+            "manual_additional": {"msg": "Add another one: "},
         }
     },
     "warning": {
@@ -261,9 +287,9 @@ cli_objects = {
         },
         "elements": {
             "invalid_input": {"msg": "Invalid input"}, # General
-            "empty_input": {"msg": "No folder path(s) to process"}, # General
+            "empty_input": {"msg": "No dir path(s) to process"}, # General
             "csv_load_failed": {"msg": "CSV loading failed with the reason - {error}"}, # CSV
-            "path_data_processing_failed": {"msg": "Path data processing failed with the reason - {error}"}, # Path data
+            "dir_paths_processing_failed": {"msg": "Dir paths processing failed with the reason - {error}"}, # Path data
             "ext_not_supported": {"msg": "File extension '{ext}' is not supported"}, # File / Extension
         }
     },
@@ -278,10 +304,10 @@ cli_objects = {
         "elements": {
             "exit": {"msg": "Script terminated"}, # General
             "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Output ready"},
-            "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {path}"},
-            "added": {"msg": "[Added] -----> {path_count} folder path(s)"},
+            "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {dir_path}"},
+            "added": {"msg": "[Added] -----> {dir_paths_count} dirs && {file_paths_count} files"},
             "skipped": {"msg": "[Skipped] -----> as already in scope"},
-            "selected":{"icon": Emoji.BULLSEYE.repeat(1), "msg": "[Selected] -----> {path_count} folder path(s)"}
+            "selected":{"icon": Emoji.BULLSEYE.repeat(1), "msg": "[Selected] -----> {dir_paths_count} dirs && {file_paths_count} files"}
         }
     },
 }
@@ -313,7 +339,7 @@ input_args = {
     "manual": ("manual_menu", "manual")
 }
 
-## String helpers
+## String helpers ##
 
 def lower_text(text: str) -> str:
     return text.lower()
@@ -321,10 +347,10 @@ def lower_text(text: str) -> str:
 def strip_text(text: str, char_to_remove: Optional[str] = None) -> str:
     return text.strip(char_to_remove) 
 
-def lstrip_text(text: str, char_to_remove: Optional[str] = None) -> str:
+def lstrip_text(text: str, char_to_remove: Optional[str] = None) -> str: # not used
     return text.lstrip(char_to_remove) 
 
-def rstrip_text(text: str, char_to_remove: Optional[str] = None) -> str:
+def rstrip_text(text: str, char_to_remove: Optional[str] = None) -> str: # not used  
     return text.rstrip(char_to_remove) 
 
 def split_text(text: str, separator: Optional[str] = None) -> str:
@@ -332,100 +358,120 @@ def split_text(text: str, separator: Optional[str] = None) -> str:
         return text
     return text.split(separator)
 
-def count_char(text:str, char:str) -> int:
+def count_char(text: str, char:str) -> int: # not used
     return text.count(char)
+
+def count_letters(text: str) -> int:
+    is_letters = [char.isalpha() for char in text]
+    return (sum(is_letters))
 
 def find_char(text:str, char:str) -> int:
     return text.find(char)
 
 def get_placeholders(text: str) -> set:
-    return {
-        placehoder
-        for _, placehoder, _, _, in Formatter().parse(text)
-        if placehoder
-    }
+    placeholders = set()
+    for _, field_name, format_spec, _ in Formatter().parse(text):
+        if field_name:
+            placeholders.add(field_name)
+            if format_spec:
+                placeholders.update(get_placeholders(format_spec))
+    return placeholders
 
-## Path helpers
+## Path helpers ##
 
-def is_file(path: str) -> bool:
-    return os.path.isfile(path)
-
-def is_not_file(path: str) -> bool:
-    return not os.path.isfile(path)
-
-def is_folder(path:str) -> bool:
-    return os.path.isdir(path)
-
-def is_not_folder(path:str) -> bool:
-    return not os.path.isdir(path)
-
-def get_file_extension(path: str) -> str:
-    if is_not_file(path):
-        raise FileNotFoundError(f"No such file: {path}")
-    if find_char(path, ".") > 0:
-        return os.path.splitext(path)[1]
-    else:
-        return os.path.splitext(path)[0]
-
-def get_file_basename(path: str) -> str:
-    if is_not_file(path):
-        raise FileNotFoundError(f"No such file: {path}")
-    if find_char(path, ".") > 0:
-        return os.path.splitext(path)[0]
-    else:
-        return ""
-
+# General
 def get_abs_path(path: str) -> str:
     return os.path.abspath(path)
 
 def get_common_path(paths: Iterable[str]) -> str:
     return os.path.commonpath(paths)
 
-def is_parent(path: str, of_path: str) -> bool:
-    if is_not_folder(path) or is_not_file(of_path):
-        raise NotADirectoryError(f"Provided path '{path}' is not a folder")
-    abs_path = get_abs_path(path)
-    abs_of_path = get_abs_path(of_path)
-    common_path = get_common_path([abs_path, abs_of_path])
-    return abs_path == common_path and abs_path != abs_of_path
-
-def get_drive_root(path: str) -> str:
-    if is_not_folder(path):
-        raise NotADirectoryError(f"Provided path '{path}' is not a folder")
-    abs_path = get_abs_path(path)
-    drive_root, _ = os.path.splitdrive(abs_path)
-    return drive_root
+def get_normalized_path(path: str, path_separator: str = os.sep) -> str:
+    normalized_path = strip_text(path, char_to_remove=path_separator)
+    letters_count = count_letters(normalized_path)
+    chars_count = len(normalized_path)
+    if letters_count == 1 and chars_count == 2:
+        return normalized_path + path_separator
+    elif letters_count == 1 and chars_count == 1:
+        return normalized_path + ":" + path_separator 
+    return normalized_path
 
 def get_path_length(path: str, path_separator: str = os.sep) -> int:
     path_elements = split_text(path, path_separator)
     path_length = len(path_elements)
     return path_length
 
-def get_path_depth(path: str) -> int: # depth starting index 0 vs 1 ?
-    if is_not_folder(path):
-        raise NotADirectoryError(f"Provided path '{path}' is not a folder")
+# File specific
+def is_file(path: str) -> bool:
+    return os.path.isfile(path)
+
+def is_not_file(path: str) -> bool:
+    return not os.path.isfile(path)
+
+def get_file_extension(path: str, ext_separator: str = '.') -> str:
+    if is_not_file(path):
+        raise FileNotFoundError(f"No such file: {path}")
+    if find_char(path, ext_separator) > 0:
+        return os.path.splitext(path)[1]
+    else:
+        return os.path.splitext(path)[0]
+
+def get_file_basename(path: str, ext_separator: str = '.') -> str: # not used
+    if is_not_file(path):
+        raise FileNotFoundError(f"No such file: {path}")
+    if find_char(path, ext_separator) > 0:
+        return os.path.splitext(path)[0]
+    else:
+        return ""
+
+# Dirs specific
+def is_dir(path:str) -> bool:
+    return os.path.isdir(path)
+
+def is_not_dir(path:str) -> bool:
+    return not os.path.isdir(path)
+
+def is_parent(path: str, of_path: str) -> bool: # not used
+    if is_not_dir(path) or is_not_file(of_path):
+        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
+    abs_path = get_abs_path(path)
+    abs_of_path = get_abs_path(of_path)
+    common_path = get_common_path([abs_path, abs_of_path])
+    return abs_path == common_path and abs_path != abs_of_path
+
+def get_root_dir(path: str) -> str: # not used
+    if is_not_dir(path):
+        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
+    abs_path = get_abs_path(path)
+    drive_root, _ = os.path.splitdrive(abs_path)
+    return drive_root
+
+def get_dir_depth(path: str) -> int: # depth starting index 0 vs 1 ?
+    if is_not_dir(path):
+        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     abs_path = get_abs_path(path)
     normalize_path = strip_text(abs_path, char_to_remove=os.sep)
     return get_path_length(normalize_path) - 1
 
 def get_branch_depth_from_root(path: str) -> tuple[int, int]:
-    if is_not_folder(path):
-        raise NotADirectoryError(f"Provided path '{path}' is not a folder")
+    if is_not_dir(path):
+        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     return max(
-        get_path_depth(root_path)
-        for root_path, _ , _ in os.walk(path)
+        get_dir_depth(root)
+        for root, _ , _ in tqdm(os.walk(path), unit=" dir", desc="Computing branch depth")
     )
 
-def iter_hierarchy_until(path: str, max_depth: int) -> Iterator[tuple[int, str]]:
-    if is_not_folder(path):
-        raise NotADirectoryError(f"Provided path '{path}' is not a folder")
-    for root_path, folders , files in os.walk(path):
-        current_depth = get_path_depth(root_path)
-        if current_depth >= max_depth:
-            folders[:] = []
-        yield current_depth, root_path, files
+def iter_dir_hierarchy(path: str, max_depth_from_dir: int) -> Iterator[tuple[int, str]]:
+    if is_not_dir(path):
+        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
+    max_depth_from_root = max_depth_from_dir + get_dir_depth(path)
+    for root, dirs, files in tqdm(os.walk(path), unit=" dir", desc="Scanning dir hierarchy"):
+        current_depth = get_dir_depth(root)
+        if current_depth >= max_depth_from_root:
+            dirs[:] = []
+        yield current_depth, root, files
 
-## DF helpers
+## DF helpers ##
 
 def open_csv(path: str) -> pd.DataFrame: # hardcoded "file extension"
     if is_file(path):
@@ -434,7 +480,7 @@ def open_csv(path: str) -> pd.DataFrame: # hardcoded "file extension"
             raise ValueError(f"File extension '{file_extension}' is not supported")
     return pd.read_csv(path)
 
-## CLI helpers
+## CLI helpers ##
 
 def render_cli_object(cli_object: dict, element_name: str = None, **runtime_args) -> str:
     # Validate CLI object dict
@@ -451,8 +497,6 @@ def render_cli_object(cli_object: dict, element_name: str = None, **runtime_args
     merged_config = {**default_config, **element_config}
     # Validate template placeholders
     template_args = get_placeholders(template)
-    missing_configs = template_args - merged_config.keys()
-    assert not missing_configs, f"Missing config arguments keys: {missing_configs}"
     # Fill in the template placeholders
     if "msg" in merged_config:
         text_args = get_placeholders(merged_config["msg"])
@@ -460,6 +504,8 @@ def render_cli_object(cli_object: dict, element_name: str = None, **runtime_args
             missing = text_args - runtime_args.keys()
             assert not missing, f"Missing arguments for placeholders: {missing}"
             merged_config["msg"] = merged_config["msg"].format(**runtime_args)
+    missing_configs = template_args - merged_config.keys()
+    assert not missing_configs, f"Missing config arguments keys: {missing_configs}" 
     final_element = template.format(**merged_config)
     return final_element
 
@@ -492,20 +538,20 @@ def main_loop(cli_grouped_objects: dict, cli_objects: dict, input_args: dict): #
         if not args:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             continue
-        paths_by_dist_from_root, in_action = input_loop(cli_grouped_objects, cli_objects, *args)
+        files_by_dist_from_root, in_action = input_loop(cli_grouped_objects, cli_objects, *args)
         # Loop control parameters check
         match in_action:
             case MenuActions.INTERUPT:
                 continue
             case MenuActions.SUCCESS:
                 print(render_cli_object(cli_objects["info"], "output_ready"))
-                return paths_by_dist_from_root
+                return files_by_dist_from_root
 
 def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_name): # 2nd level
     while True:
         # Render menu
         print(render_cli_grouped_object(cli_grouped_objects[menu_name], cli_objects))
-        folder_paths = []
+        input_dir_paths = []
         # Open CSV
         if menu_name == "csv_menu":
             # Request user input
@@ -513,12 +559,13 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
                 user_input = input(render_cli_object(cli_objects["prompt"], prompt_name))
                 user_input = strip_text(user_input)
             except KeyboardInterrupt:
+                print()
                 return None, MenuActions.INTERUPT
             # Open CSV
             try:
                 raw_data = open_csv(user_input)
-                if PathDataSchema.FolderPath in raw_data:
-                    folder_paths = raw_data[PathDataSchema.FolderPath].to_list()
+                if DirPathSchema.DirPath in raw_data:
+                    input_dir_paths = raw_data[DirPathSchema.DirPath].to_list()
             except (FileNotFoundError, ValueError, PermissionError, ParserError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
@@ -526,47 +573,47 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
             # Request user input
             try:
                 while True:
-                    if len(folder_paths) == 0:
+                    if len(input_dir_paths) == 0:
                         user_input = input(render_cli_object(cli_objects["prompt"], prompt_name))
                     else:
                         user_input = input(render_cli_object(cli_objects["prompt"], "manual_additional"))
                     user_input = strip_text(user_input)
                     if user_input == "stop":
                         break
-                    folder_paths.append(user_input)
+                    input_dir_paths.append(user_input)
             except KeyboardInterrupt:
+                print()
                 return None, MenuActions.INTERUPT
         # Load, normalize and enrich path data
         try:
             processor = (
-                PathData(PathDataSchema)
-                .load(folder_paths)
-                .normalize()
-                .add_hierarchy_depth_data()
+                DirPathData(DirPathSchema)
+                .load(input_dir_paths)
+                .filter_by(rules=[("isInvalid", True), ("isDuplicate", True)])
+                .enrich(features=["DirDepth", "BranchDepth", "BranchDepthFromDir"])
             )
         except (EmptyDataError, RuntimeError) as e:
-            print(render_cli_object(cli_objects["warning"], "path_data_processing_failed", error=e))
+            print(render_cli_object(cli_objects["warning"], "dir_paths_processing_failed", error=e))
             continue
         # Get paths by dist from root
-        path_data = processor.valid_data
-        print(path_data)
-        max_depth = path_data[PathDataSchema.BranchDepth].max()
-        folders_by_dist_from_root = {depth: [] for depth in range(0, max_depth + 1)}
-        files_by_dist_from_root = {depth: [] for depth in range(0, max_depth + 1)}
+        dir_data = processor.active_df
+        max_branch_depth = processor.max_branch_depth
+        dirs_by_depth = {depth: [] for depth in range(0, max_branch_depth + 1)}
+        dir_paths = []
+        file_paths = []
         # Resolve parent-child relationship
         reload = False
-        total_folders_added = 0
+        total_dirs_added = 0
         total_files_added = 0
-        for _, row in path_data.iterrows():
-            # folder_path = strip_text(row[PathDataSchema.FolderPath], char_to_remove=os.sep)
-            folder_path = row[PathDataSchema.FolderPath]
-            path_depth = row[PathDataSchema.PathDepth]
-            branch_depth_from_path = row[PathDataSchema.BranchDepthFromPath]
+        for _, row in dir_data.iterrows():
+            dir_path = row[DirPathSchema.DirPath]
+            dir_depth = row[DirPathSchema.DirDepth]
+            branch_depth_from_dir = row[DirPathSchema.BranchDepthFromDir]
             print(Delimiter.DASH.repeat(80))
-            print(render_cli_object(cli_objects["info"], "processing", path=folder_path))
+            print(render_cli_object(cli_objects["info"], "processing", dir_path=dir_path))
             print(Icon.DOWNARROW.repeat(3))
-            if folder_path not in folders_by_dist_from_root[path_depth]:
-                depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth_from_path)
+            if dir_path not in dirs_by_depth[dir_depth]:
+                depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth_from_dir)
                 match in_action:
                     case MenuActions.SKIP:
                         continue
@@ -576,18 +623,19 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
                         reload = True
                         break
                     case MenuActions.SUCCESS:
-                        folders_added = 0
+                        dirs_added = 0
                         files_added = 0
-                        for depth, folder_path, files in iter_hierarchy_until(folder_path, depth_input):
-                            folders_by_dist_from_root[depth].append(folder_path)
-                            files_by_dist_from_root[depth].extend(files)
-                            folders_added += 1
+                        for depth, dir_path, files in iter_dir_hierarchy(dir_path, depth_input):
+                            dirs_by_depth[depth].append(dir_path)
+                            dir_paths.append(dir_path)
+                            current_files = [os.path.join(dir_path, filename) for filename in files]
+                            file_paths.extend(current_files)
+                            dirs_added += 1
                             files_added += len(files)
-                        total_folders_added += folders_added
+                        total_dirs_added += dirs_added
                         total_files_added += files_added
                         print(Icon.DOWNARROW.repeat(3))
-                        print(render_cli_object(cli_objects["info"], "added", path_count=folders_added))
-                        print(render_cli_object(cli_objects["info"], "added", path_count=files_added))
+                        print(render_cli_object(cli_objects["info"], "added", dir_paths_count=dirs_added, file_paths_count=files_added))
                         continue
             else:
                 print(render_cli_object(cli_objects["info"], "skipped"))
@@ -595,14 +643,13 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, menu_name, prompt_n
         if reload:
             return None, MenuActions.RESTART
         print(Delimiter.DASH.repeat(80))
-        print(render_cli_object(cli_objects["info"], "selected", path_count=total_folders_added))
-        print(render_cli_object(cli_objects["info"], "selected", path_count=total_files_added))
+        print(render_cli_object(cli_objects["info"], "selected", dir_paths_count=total_dirs_added, file_paths_count=total_files_added))
         print(Icon.DOWNARROW.repeat(3))
         
-        if total_folders_added == 0:
+        if total_files_added == 0:
             return None, MenuActions.FAILED
         
-        return files_by_dist_from_root, MenuActions.SUCCESS
+        return file_paths, MenuActions.SUCCESS
 
 def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth): # 3rd level
     while True:
@@ -614,6 +661,7 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth): # 3r
             user_input = input(render_cli_object(cli_objects["prompt"]))
             user_input = lower_text(strip_text(user_input))
         except KeyboardInterrupt:
+            print()
             return None, MenuActions.INTERUPT
         # Process input
         if user_input == "skip":
@@ -632,11 +680,6 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth): # 3r
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
 
 if __name__ == "__main__":
-    paths_by_dist_from_root = main_loop(cli_grouped_objects, cli_objects, input_args)
-    result = []
-    for files in paths_by_dist_from_root.values():
-        result.extend(files)
-    files_df = pd.DataFrame({"Files": result})
-    files_df.to_excel("files.xlsx")
-    # if paths_by_dist_from_root:
-    #     print(paths_by_dist_from_root)
+    file_paths = main_loop(cli_grouped_objects, cli_objects, input_args)
+    files_df = pd.DataFrame(file_paths)
+    print(files_df.head())
