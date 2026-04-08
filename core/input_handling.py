@@ -1,6 +1,6 @@
 from cli.assets import Delimiter, Emoji, Icon, Template
 from cli.renderer import render_cli_object, render_cli_grouped_object
-from df_processing.processor import DfProcessor, EmptyDataError
+from core.df_processor import DfProcessor, EmptyDataError
 from enum import StrEnum, auto
 import os
 os.environ["DISABLE_PANDERA_IMPORT_WARNING"] = "True"
@@ -10,6 +10,7 @@ from pandas.errors import ParserError
 from typing import Optional
 from utils.path import is_not_dir, is_parent, get_normalized_path, get_dir_depth, get_branch_depth
 from utils.text import lower_text, strip_text
+import sys
 
 # To improve:
 # instead of os.walk(), create recursion based on os.scandir()
@@ -64,7 +65,7 @@ def main_loop(cli_grouped_objects: dict, cli_objects: dict): # 1st level
             print()
             print(Icon.DOWNARROW.repeat(3))
             print(render_cli_object(cli_objects["info"], "exit"))
-            break
+            sys.exit(0)
         # User input handling
         selected_dirs, in_action = input_loop(cli_grouped_objects, cli_objects, input_option)
         # Loop control parameters check
@@ -97,23 +98,22 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
         # Manual Load
         elif input_option == "manual":
             # Render menu
-            print(render_cli_grouped_object(cli_grouped_objects["csv_menu"], cli_objects))
+            print(render_cli_grouped_object(cli_grouped_objects["manual_menu"], cli_objects))
             # Request user input
             try:
-                input_dir_paths = []
+                input_dirs = []
                 while True:
-                    input_dir_path = input(render_cli_object(cli_objects["prompt"], "manual"))
-                    if len(input_dir_paths) > 0:
-                        input_dir_path = input(render_cli_object(cli_objects["prompt"], "manual_additional"))
-                    input_dir_path = strip_text(input_dir_path)
-                    if input_dir_path == "stop":
+                    prompt_key = "manual" if not input_dirs else "manual_additional"
+                    input_dir = input(render_cli_object(cli_objects["prompt"], prompt_key))
+                    input_dir = strip_text(input_dir)
+                    if input_dir == "stop":
                         break
-                    input_dir_paths.append(input_dir_path)
+                    input_dirs.append(input_dir)
             except KeyboardInterrupt:
                 print()
                 return None, MenuActions.INTERUPT
             try:
-                processor = DfProcessor(DirPathSchema, CALCULATION_LOGIC_REGISTRY).load_list(input_dir_paths, col=DirPathSchema.DirPath)
+                processor = DfProcessor(DirPathSchema, CALCULATION_LOGIC_REGISTRY).load_list(input_dirs, col=DirPathSchema.DirPath)
             except (TypeError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
                 continue
@@ -122,6 +122,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
         # Normalize and enrich loaded data
+        print(Delimiter.DASH.repeat(80))
         (
             processor
             .transform(
@@ -164,10 +165,10 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             # Check if parent cover scope of dir in processig
             scope_overlap = False
             for parent in parents:
-                defined_depth = dir_data[DirPathSchema.UserInputDepth].loc[dir_data[DirPathSchema.DirPath]==parent].item()
+                defined_depth = dir_data[DirPathSchema.ProcessingDepth].loc[dir_data[DirPathSchema.DirPath]==parent].item()
                 if dir_depth <= defined_depth:
                     scope_overlap = True
-                break
+                    break
             if scope_overlap:
                 # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new
                 print(render_cli_object(cli_objects["info"], "skipped"))
@@ -185,11 +186,11 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                     break
                 case MenuActions.SUCCESS:
                     dir_data.at[idx, DirPathSchema.UserInputDepth] = depth_input
+                    dir_data.at[idx, DirPathSchema.ProcessingDepth] = dir_depth + depth_input
                     processed_dirs.append(dir_path)
         if reload:
             continue
         
-        dir_data[DirPathSchema.ProcessingDepth] = dir_data[DirPathSchema.DirDepth] + dir_data[DirPathSchema.UserInputDepth]
         selected_dirs = list(dir_data[[DirPathSchema.DirPath, DirPathSchema.ProcessingDepth]].dropna().itertuples(index=False, name=None))
         
         if not selected_dirs:
@@ -240,10 +241,10 @@ def get_user_input():
                 "msg": "empty"
             },
             "elements":{
-                "main": {"sep": Delimiter.DASH.repeat(30), "msg": "Input Methods", "width": 15},
-                "csv_load": {"sep": Delimiter.DASH.repeat(30), "msg": "CSV load", "width": 15},
-                "manual_load": {"sep": Delimiter.DASH.repeat(30), "msg": "Manual load", "width": 15},
-                "depth": {"sep": Delimiter.DASH.repeat(30), "msg": "Depth", "width": 15}
+                "main": {"sep": Delimiter.DASH.repeat(30), "msg": "Input Methods", "width": 20},
+                "csv_load": {"sep": Delimiter.DASH.repeat(30), "msg": "CSV load", "width": 20},
+                "manual_load": {"sep": Delimiter.DASH.repeat(30), "msg": "Manual load", "width": 20},
+                "depth": {"sep": Delimiter.DASH.repeat(30), "msg": "Depth", "width": 20}
             }
         },
         "menu_line": {
