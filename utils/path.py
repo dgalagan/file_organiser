@@ -68,7 +68,7 @@ def get_file_extension(path: str, ext_separator: str = '.') -> str:
     else:
         return ""
 
-def get_file_basename(path: str, ext_separator: str = '.') -> str:
+def get_file_stem(path: str, ext_separator: str = '.') -> str:
     if is_not_file(path):
         raise FileNotFoundError(f"No such file: {path}")
     basename = os.path.basename(path)
@@ -76,6 +76,25 @@ def get_file_basename(path: str, ext_separator: str = '.') -> str:
         return os.path.splitext(basename)[-2]
     else:
         return ""
+
+def get_file_name(path):
+    return os.path.basename(path)
+
+def get_file_stat(path: str) -> dict:
+    stat = os.stat(path)
+    return {
+        "UserId": stat.st_uid,
+        "GroupId": stat.st_gid,
+        "Name":get_file_name(path),
+        "Ext": get_file_extension(path),
+        "Size": stat.st_size,
+        "isReadonly": is_readonly(path),
+        "isHidden": is_hidden(path),
+        "isSystem": is_system(path),
+        "AccessedAt": stat.st_atime,
+        "ModifiedAt": stat.st_mtime,
+        "CreatedAt": stat.st_birthtime,
+    }
 
 # Dirs specific
 def is_dir(path:str) -> bool:
@@ -132,20 +151,20 @@ def iter_dir_hierarchy(path: str, max_depth_from_root: int, pbar=None) -> Iterat
             dirs[:] = []
         yield current_depth, root, files
 
-def extesion_priority_sort(path: str, priority_map=None) -> tuple:
+# def extesion_priority_sort(path: str, priority_map=None) -> tuple:
     
-    if is_not_file(path):
-        raise FileNotFoundError(f"No such file: {path}")
+#     if is_not_file(path):
+#         raise FileNotFoundError(f"No such file: {path}")
     
-    filename = get_file_basename(path) 
-    ext = get_file_extension(path)
-    dir = get_file_dir(path)
+#     filename = get_file_basename(path) 
+#     ext = get_file_extension(path)
+#     dir = get_file_dir(path)
 
-    is_temp = 1 if filename.startswith("~") else 0
+#     is_temp = 1 if filename.startswith("~") else 0
     
-    if priority_map is not None:
-        last_priority = max(priority_map.values()) + 1
-        priority = priority_map.get(ext, last_priority)
-        return (is_temp, priority, dir, filename)
+#     if priority_map is not None:
+#         last_priority = max(priority_map.values()) + 1
+#         priority = priority_map.get(ext, last_priority)
+#         return (is_temp, priority, dir, filename)
     
-    return (is_temp, dir, filename)
+#     return (is_temp, dir, filename)

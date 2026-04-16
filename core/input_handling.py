@@ -305,12 +305,12 @@ def get_user_input():
                 "msg": "empty"
             },
             "elements": {
-            "exit": {"msg": "Script terminated"}, # General
-            "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Output ready"},
+            "exit": {"msg": "Script terminated"},
             "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {dir_path}"},
             "added": {"msg": "[Added] -----> {dir_paths_count} dirs"},
             "skipped": {"msg": "[Skipped] -----> as already in scope"},
-            "selected":{"icon": Emoji.BULLSEYE.repeat(1), "msg": "[Selected] -----> {dir_paths_count} dirs"}
+            "selected":{"icon": Emoji.BULLSEYE.repeat(1), "msg": "[Selected] -----> {dir_paths_count} dirs"},
+            "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Files aquisition completed"},
         }
         },
     }
