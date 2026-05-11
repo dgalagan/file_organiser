@@ -1,5 +1,7 @@
 import ctypes
 import os
+import shutil
+import stat
 from typing import Iterable, Iterator
 from tqdm import tqdm
 from utils.text import strip_text, split_text, count_letters, count_char
@@ -54,6 +56,14 @@ def is_system(path: str) -> bool:
         return False
     return bool(attrs & FILE_ATTRIBUTE_SYSTEM)
 
+def is_accessible(path: str):
+    try:
+        with open(path, "rb", buffering=0) as f:
+            f.read(0)
+        return True
+    except (PermissionError, OSError, IOError):
+        return False
+
 def get_file_dir(path: str) -> str:
     if is_not_file(path):
         raise FileNotFoundError(f"No such file: {path}")   
@@ -83,10 +93,10 @@ def get_file_name(path):
 def get_file_stat(path: str) -> dict:
     stat = os.stat(path)
     return {
-        "UserId": stat.st_uid,
-        "GroupId": stat.st_gid,
+        # "UserId": stat.st_uid,
+        # "GroupId": stat.st_gid,
         "Name":get_file_name(path),
-        "Ext": get_file_extension(path),
+        "Ext": get_file_extension(path).replace(".", ""),
         "Size": stat.st_size,
         "isReadonly": is_readonly(path),
         "isHidden": is_hidden(path),
@@ -95,6 +105,7 @@ def get_file_stat(path: str) -> dict:
         "ModifiedAt": stat.st_mtime,
         "CreatedAt": stat.st_birthtime,
     }
+
 
 # Dirs specific
 def is_dir(path:str) -> bool:
@@ -130,41 +141,36 @@ def get_branch_depth(path: str) -> tuple[int, int]:
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     return max(
         get_dir_depth(root)
-        for root, _ , _ in tqdm(os.walk(path), unit=" dir", desc=f"Scanning branch depth {path:<40}")
+        for root, _ , _ in os.walk(path)
     )
 
-def iter_dir_hierarchy(path: str, max_depth_from_root: int, pbar=None) -> Iterator[tuple[int, str]]:
+def iter_dir_hierarchy(path: str, max_depth_from_root: int) -> Iterator[tuple[int, str]]:
     
     if is_not_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     
     for root, dirs, files in os.walk(path):
         current_depth = get_dir_depth(root)
-
-        if pbar is not None:
-            pbar.update(1)
-            if not hasattr(pbar, "file_count"): pbar.file_count = 0
-            pbar.file_count += len(files)
-            pbar.set_postfix({"files": pbar.file_count}, refresh=False)
-
         if current_depth >= max_depth_from_root:
             dirs[:] = []
         yield current_depth, root, files
 
-# def extesion_priority_sort(path: str, priority_map=None) -> tuple:
-    
-#     if is_not_file(path):
-#         raise FileNotFoundError(f"No such file: {path}")
-    
-#     filename = get_file_basename(path) 
-#     ext = get_file_extension(path)
-#     dir = get_file_dir(path)
+def remove_readonly(func, path, _):
+    "Clear the readonly bit and reattempt the removal"
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
-#     is_temp = 1 if filename.startswith("~") else 0
-    
-#     if priority_map is not None:
-#         last_priority = max(priority_map.values()) + 1
-#         priority = priority_map.get(ext, last_priority)
-#         return (is_temp, priority, dir, filename)
-    
-#     return (is_temp, dir, filename)
+def clean_dir(path: str):
+    dir_content = os.listdir(path)
+    success = True
+    for obj_name in dir_content:
+        obj_path = os.path.join(path, obj_name)
+        try:
+            if is_file(obj_path):
+                os.remove(obj_path)
+            elif is_dir(obj_path):
+                shutil.rmtree(obj_path, onexc=remove_readonly)
+        except Exception as e:
+            print(f"Failed to delete {obj_path}. Reason {e}")
+            success = False
+    return success

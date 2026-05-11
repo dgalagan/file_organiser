@@ -1,16 +1,11 @@
+import datetime
 from exiftool import ExifTool
 import hashlib
+import json
+import os
+from tqdm import tqdm
 from utils.path import is_file, get_file_stat
 from utils.text import split_text
-from tqdm import tqdm
-import datetime
-import os
-import json
-
-def read_bytes(path, count=None):
-    with open(path, "rb") as f:
-        header = f.read(count)
-        return header.hex().upper()
 
 OFFICE_SIGS = {
     4: [
@@ -143,23 +138,9 @@ def get_file_hash(path, hash_algo, parts, read_cap):
                 f.seek(byte_step, 0)
                 data = f.read(read_cap)
                 combined_hash.update(data)
-        return {"Hash": combined_hash.hexdigest()}
+        return combined_hash.hexdigest()
     except PermissionError:
-        return {}
-
-def is_file_changed(path: str, stored_metadata: dict) -> bool:
-    if not stored_metadata:
-        # Empty dict means 'new' file arrived
-        return True
-    current_mtime = os.path.getmtime(path)
-    current_size = os.path.getsize(path)
-    stored_mtime = normalize_exif_datetime(stored_metadata.get("File:FileModifyDate"))
-    stored_size = stored_metadata.get("File:FileSize")
-    # Check for size or modified time differences
-    if abs(current_mtime - stored_mtime) > 1 or current_size != stored_size:
-        return True
-    
-    return False
+        return None
 
 def get_exif_metadata(batch: list[str], et, et_cfg) -> list[dict] | list:
     try:
@@ -167,12 +148,13 @@ def get_exif_metadata(batch: list[str], et, et_cfg) -> list[dict] | list:
         batch_results = json.loads(raw_output)
         return batch_results
     except Exception as e:
+        print(e)
         return []
 
 def get_batches(files: list[str], batch_size=None):
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
 
-def normalize_exif_datetime(raw_date, separator=" "):
+def datetime_to_timestamp(raw_date, separator=" "):
     if separator in raw_date:
         date_elements = split_text(raw_date, separator=separator)
         date_elements[0] = date_elements[0].replace(":", "-")
@@ -181,72 +163,115 @@ def normalize_exif_datetime(raw_date, separator=" "):
     iso_date = raw_date[:10].replace(":", "-") + raw_date[10:0]
     return datetime.datetime.fromisoformat(iso_date).timestamp()
 
-def run_metadata_extraction(files: list[str], storage_cfg, exif_cfg, hash_cfg, reset_storage=False, batch_size=None):
-    # Tqdm bar format 
+def run_metadata_extraction(files: set[str], storage_cfg, exif_cfg, hash_cfg, reset_storage=False, batch_size=None):
+    ########     TQDM BAR     ########
     b_format = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
-    # Initialize new json storage or load existing
+    ########   INIT STORAGE   ########
+    storage = {}
     for path, config in storage_cfg.items():
-        exists = is_file(path)
-        container = config.get("structure")
-        encoding = config.get("encoding")
-        indent = config.get("indent")
-        if not exists or reset_storage:
+        if not is_file(path) or reset_storage:
+            container = config.get("structure")
+            encoding = config.get("encoding")
+            indent = config.get("indent")
             init_json(path, container=container, encoding=encoding, indent=indent)
+            storage[path] = container
+        else:
+            storage[path] = load_json(path)
+    
+    ########   LOAD STORAGE   ########
+    exif_metadata = storage.get("db\\exif_metadata.json", [])
+    basic_metadata = storage.get("db\\basic_metadata.json", {})
+    hash_cfg_str = "".join(str(value) for value in hash_cfg.values())
+    exif_cfg_str = "".join(exif_cfg)
+    
+    ######## FAILED FILES ########
+    failed_files = set()
 
-    # Load stored data
-    files_metadata = load_json("db\\files_metadata.json")
-    stored_exif_cfg = load_json("db\\exif_cfg.json")
-    stored_hash_cfg = load_json("db\\hash_cfg.json")
-
-    # Select updated and new files
-    files_to_process = []
-    desc = "Select new and updated files"
+    ######## BASIC METADATA + HASH ########
+    new_files = files.difference(set(basic_metadata.keys()))
+    files_to_exif = new_files.copy()
+    desc = "Acquiring basic metadata + Hash"
     for file in tqdm(files, desc=f"{desc:<35}", bar_format=b_format):
-        stored_metadata = files_metadata.get(file, {})
-        if is_file_changed(file, stored_metadata):
-            files_to_process.append(file)
-            files_metadata[file] = {}
+        # Get stored values
+        stored_basic_metadata =  basic_metadata.get(file, {})
+        stored_mtime = stored_basic_metadata.get("ModifiedAt")
+        stored_size = stored_basic_metadata.get("Size")
+        stored_hash_cfg = stored_basic_metadata.get("HashConfig", "")
+        stored_exif_cfg = stored_basic_metadata.get("ExifConfig", "")
+        # Get current values
+        current_mtime = os.path.getmtime(file)
+        current_size = os.path.getsize(file)
+        # Calculate change conditions
+        is_new = file in new_files
+        is_modified = current_size != stored_size or abs(current_mtime - stored_mtime) > 0.1
+        is_hash_cfg_changed = hash_cfg_str != stored_hash_cfg
+        is_exif_cfg_changed = exif_cfg_str != stored_exif_cfg
+        # Evaluate conditions
+        if is_new:
+            file_meta = get_file_stat(file)
+            file_hash = get_file_hash(file, **hash_cfg)
+            if not file_meta or file_hash is None:
+                failed_files.add(file)
+            basic_metadata[file] = {
+                **file_meta,
+                "Hash": file_hash,
+                "HashConfig": hash_cfg_str,
+                "ExifConfig": exif_cfg_str
+            }
+        elif is_modified:
+            file_meta = get_file_stat(file)
+            file_hash = get_file_hash(file, **hash_cfg)
+            if not file_meta or file_hash is None:
+                failed_files.add(file)
+            basic_metadata[file].update({
+                **file_meta,
+                "Hash": file_hash,
+            })
+            if is_hash_cfg_changed:
+                basic_metadata[file].update({"HashConfig": hash_cfg_str})
+            if is_exif_cfg_changed:
+                basic_metadata[file].update({"ExifConfig": exif_cfg_str})
+            files_to_exif.add(file)
+        else:
+            if is_hash_cfg_changed:
+                file_hash = get_file_hash(file, **hash_cfg)
+                if file_hash is None:
+                    failed_files.add(file)
+                basic_metadata[file].update({
+                    "HashConfig": hash_cfg_str,
+                    "Hash": file_hash
+                })
+            if is_exif_cfg_changed:
+                basic_metadata[file].update({
+                    "ExifConfig": exif_cfg_str
+                })
+                files_to_exif.add(file)
     
-    latest_hash_cfg = None
-    if stored_hash_cfg:
-        latest_cfg_mtime = max(stored_hash_cfg.keys(), key=float)
-        latest_hash_cfg = stored_hash_cfg.get(latest_cfg_mtime, {})
-    if latest_hash_cfg == hash_cfg:
-        print("Hash config unchanged. Processing only new/modified files.")
-        target_files = files_to_process
-    else:
-        print("Hash config changed or new. Re-processing all files.")
-        stored_hash_cfg[datetime.datetime.today().timestamp()] = hash_cfg
-        target_files = files
+    ######## EXIF METADATA ########
+    # Clean up exif metadata
+    if files_to_exif and exif_metadata:
+        desc = "Clean up outdated exif entries"
+        for file_metadata in tqdm(exif_metadata, desc=f"{desc:<35}", bar_format=b_format):
+            if file_metadata["SourceFile"].replace('/', '\\') in files_to_exif:
+                exif_metadata.remove(file_metadata)
+            continue
     
-    desc = "Getting hashes"
-    for file_to_process in tqdm(target_files, desc=f"{desc:<35}", bar_format=b_format):
-        file_hash = get_file_hash(file_to_process, **hash_cfg)
-        files_metadata[file_to_process].update(file_hash)
-
-    desc = "Getting metadata"
-    latest_exif_cfg = None
-    if stored_exif_cfg:
-        latest_cfg_mtime = max(stored_exif_cfg.keys(), key=float)
-        latest_exif_cfg = stored_exif_cfg.get(latest_cfg_mtime, [])
-    if latest_exif_cfg == exif_cfg:
-        print("Exif config unchanged. Processing only new/modified files.")
-        target_files = files_to_process
-    else:
-        print("Exif config changed or new. Re-processing all files.")
-        target_files = files
-        stored_exif_cfg[datetime.datetime.today().timestamp()] = exif_cfg
-    
-    desc = "Getting metadata"
-    batches = get_batches(target_files, batch_size=batch_size)
-    for batch in tqdm(batches, desc=f"{desc:<35}", bar_format=b_format):
-        with ExifTool(encoding="utf-8") as et:
+    # Extract exif metadata
+    desc = "Acquiring exif metadata"
+    batches = get_batches(list(files_to_exif), batch_size=batch_size)
+    with ExifTool(encoding="utf-8") as et:
+        for batch in tqdm(batches, desc=f"{desc:<35}", bar_format=b_format):
             batch_results = get_exif_metadata(batch, et, exif_cfg)
-            for exif_dict in batch_results:
-                source_file = exif_dict.pop("SourceFile").replace("/", "\\")
-                files_metadata[source_file].update(exif_dict)
+            exif_metadata.extend(batch_results)
+            # Catch failed file
+            if {} in batch_results:
+                failed_files_idx = [idx for idx, exif_dict in enumerate(batch_results) if not exif_dict]
+                for failed_file_idx in failed_files_idx:
+                    failed_files.add(batch[failed_file_idx])
+    
+    for path, data in storage.items():
+        save_json(path, data)
 
-    if latest_hash_cfg is not None or latest_exif_cfg is not None:
-        save_json("db\\files_metadata.json", files_metadata)
-        save_json("db\\hash_cfg.json", stored_hash_cfg)
-        save_json("db\\exif_cfg.json", stored_exif_cfg)
+    print(f"--------------------------------------------------------------------------------")
+    
+    return failed_files
