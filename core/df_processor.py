@@ -181,6 +181,27 @@ class DfProcessorEXP:
                 self.history[col] = []
             self.history[col].append(self.df[col].copy)
 
+    def _apply_func(self, subset, func, func_mode):
+        
+        # helper expects subset to be DataFrame object
+        if not isinstance(subset, pd.DataFrame):
+            print(f"Incompatible datatype received {type(subset)} expected 'pd.DataFrame'")
+        
+        # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
+        # the map() method is used to transform values by applying a function, dict, or Series mapping
+        # works on both Series and DataFrame, making it a unified alternative for element-wise operations
+
+        if func_mode == "element":              # -> receive DF will return DF
+            return subset.map(func) 
+        elif func_mode == "row":                # -> receive DF most probably will return pd.Series
+            return subset.apply(func, axis=1)
+        elif func_mode == "col":                # -> receive DF most probably will return Scalar
+            return subset.apply(func, axis=0)
+        elif func_mode == "frame":
+            return subset.apply(func)
+        else:
+            print(f"Incompatible func mode for pd.DataFrame {func}")
+
     def compute(self, func, func_mode="element", store_col = "", col_names = None, col_keywords = None, row_condition = None):
         
         # 1. Overrides selection attributes if criterion provided
@@ -190,15 +211,13 @@ class DfProcessorEXP:
         cols = self.cols_selection if self.cols_selection is not None else self.df.columns.tolist()
 
         # 2. Execute based on mode
-        if func_mode == "element":
-            result = self.df.loc[rows, cols].map(func)
-        elif func_mode == "series":
-            result = self.df.loc[rows, cols].apply(func)
-        elif func_mode == "row":
-            result = self.df.loc[rows, cols].apply(func, axis=1)
-        
+        subset = self.df.loc[rows, cols]
+        result = self._apply_func(subset, func, func_mode)
+        print(f"Subset shape is {subset.shape} and type {type(subset).__name__}, Result shape is {result.shape} and type {type(result).__name__}")
+        values_to_store = result.values
+
         # 3. Assign result
-        self.df.loc[rows, store_col] = result.values
+        self.df.loc[rows, store_col] = values_to_store
 
         # 4. Reset selection attributes
         if col_names is not None or col_keywords is not None:
@@ -214,53 +233,18 @@ class DfProcessorEXP:
         self.set_cols_selection(names=col_names, keywords=col_keywords).set_rows_selection(condition=row_condition)
 
         # 2. If row, col selection not exist, select all
-        rows = self.rows_selection if self.rows_selection is not None else slice(None)
-        cols = self.cols_selection if self.cols_selection is not None else self.df.columns.tolist()
+        rows = self.rows_selection if self.rows_selection is not None else slice(None,None,None)
+        cols = self.cols_selection if self.cols_selection is not None else self.df.columns.to_list()
 
         # 2. Check if backup required
         if backup:
             self._backup(cols)
 
         # 3. Execute based on mode
-        df_slice = self.df.loc[rows, cols]
-
-
-        if isinstance(df_slice, pd.Series):
-            if func_mode == "element":
-                # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
-                # the map() method is used to transform values by applying a function, dict, or Series mapping
-                # works on both Series and DataFrame, making it a unified alternative for element-wise operations
-                result = self.df.loc[rows, cols].map(func)
-            elif func_mode == "series":
-                result = func(df_slice)
-            else:
-                print(f"Incompatible func mode for pd.Series")
-        elif isinstance(df_slice, pd.DataFrame):
-            if func_mode == "element":
-                # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
-                # the map() method is used to transform values by applying a function, dict, or Series mapping
-                # works on both Series and DataFrame, making it a unified alternative for element-wise operations
-                result = self.df.loc[rows, cols].map(func)
-            elif func_mode == "row":
-                result = self.df.loc[rows, cols].apply(func, axis=1)
-            elif func_mode == "col":
-                result = self.df.loc[rows, cols].apply(func, axis=0)
-            elif func_mode == "frame":
-                result = func(df_slice)
-            else:
-                print(f"Incompatible func mode for pd.DataFrame")
-        else:
-            print(f"Slice datatype {type(df_slice)} is not supported")
-
-        # if func_mode == "element":
-        #     # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
-        #     # the map() method is used to transform values by applying a function, dict, or Series mapping
-        #     # works on both Series and DataFrame, making it a unified alternative for element-wise operations
-        #     result = self.df.loc[rows, cols].map(func)
-        # elif func_mode == "series":
-        #     result = self.df.loc[rows, cols].apply(func)
-        # elif func_mode == "row":
-        #     result = self.df.loc[rows, cols].apply(func, axis=1)
+        subset = self.df.loc[rows, cols]
+        result = self._apply_func(subset, func, func_mode)
+        print(f"Subset shape is {subset.shape} and type {type(subset).__name__}, Result shape is {result.shape} and type {type(result).__name__}")
+        values_to_store = result.values
 
         # 4.1 Force columns to object so they can accept ANY type from function
         self.df[cols] = self.df[cols].astype(object)
@@ -287,6 +271,10 @@ class DfProcessorEXP:
         if not names and not keywords:
             return self
         
+        if isinstance(names, str):
+            print("DataFrame columns should be provided as list")
+            return self
+
         # 1b. Init search criterion
         names = names or []
         keywords = keywords or []

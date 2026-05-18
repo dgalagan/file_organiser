@@ -119,13 +119,13 @@ def main():
             .load_json("db\\exif_metadata.json", orient="records")
             .transform(os.path.normpath, col_names=["SourceFile"])
             .transform(lambda value: dt_parser.parse(value) if isinstance(value, str) else None, col_keywords=created_dt_tags)
-            .transform(lambda value: lower_text(value) if isinstance(value, str) else None, col_names=["File:FileTypeExtension"])
-            .compute(pd.Series.duplicated, func_mode="series", store_col="isDuplicate", col_names=["SourceFile"])
+            .transform(lower_text, col_names=["File:FileTypeExtension"])
+            .compute(pd.Series.duplicated, func_mode="frame", store_col="isDuplicate", col_names=["SourceFile"])
             .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
-            .compute(lambda value: dt.datetime.fromtimestamp(value).year, func_mode="element", store_col="Year", col_names=["AggTimestamp"])
+            .compute(lambda value: dt.datetime.fromtimestamp(value).year, store_col="Year", col_names=["AggTimestamp"])
             .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names=["XML:HeadingPairs"])
         )
-        print(exif_processor.df[["SourceFile", "File:FileTypeExtension", "AggTimestamp", "Year", "CountExcelWorksheets"]]) 
+        print(exif_processor.df[["SourceFile", "isDuplicate", "File:FileTypeExtension", "AggTimestamp", "Year", "CountExcelWorksheets"]])
     except Exception as e:
         print(f"{e} while processing exif")
     

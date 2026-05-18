@@ -1,7 +1,7 @@
 from typing import Optional
 
 def lower_text(text: str) -> str:
-    return text.lower()
+    return text.lower() if isinstance(text, str) else None
 
 def strip_text(text: str, char_to_remove: Optional[str] = None) -> str:
     return text.strip(char_to_remove) 
