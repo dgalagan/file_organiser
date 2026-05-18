@@ -223,16 +223,44 @@ class DfProcessorEXP:
 
         # 3. Execute based on mode
         df_slice = self.df.loc[rows, cols]
-    
-        if func_mode == "element":
-            # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
-            # the map() method is used to transform values by applying a function, dict, or Series mapping
-            # works on both Series and DataFrame, making it a unified alternative for element-wise operations
-            result = self.df.loc[rows, cols].map(func)
-        elif func_mode == "series":
-            result = self.df.loc[rows, cols].apply(func)
-        elif func_mode == "row":
-            result = self.df.loc[rows, cols].apply(func, axis=1)
+
+
+        if isinstance(df_slice, pd.Series):
+            if func_mode == "element":
+                # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
+                # the map() method is used to transform values by applying a function, dict, or Series mapping
+                # works on both Series and DataFrame, making it a unified alternative for element-wise operations
+                result = self.df.loc[rows, cols].map(func)
+            elif func_mode == "series":
+                result = func(df_slice)
+            else:
+                print(f"Incompatible func mode for pd.Series")
+        elif isinstance(df_slice, pd.DataFrame):
+            if func_mode == "element":
+                # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
+                # the map() method is used to transform values by applying a function, dict, or Series mapping
+                # works on both Series and DataFrame, making it a unified alternative for element-wise operations
+                result = self.df.loc[rows, cols].map(func)
+            elif func_mode == "row":
+                result = self.df.loc[rows, cols].apply(func, axis=1)
+            elif func_mode == "col":
+                result = self.df.loc[rows, cols].apply(func, axis=0)
+            elif func_mode == "frame":
+                result = func(df_slice)
+            else:
+                print(f"Incompatible func mode for pd.DataFrame")
+        else:
+            print(f"Slice datatype {type(df_slice)} is not supported")
+
+        # if func_mode == "element":
+        #     # https://www.geeksforgeeks.org/python/difference-between-map-applymap-and-apply-methods-in-pandas/
+        #     # the map() method is used to transform values by applying a function, dict, or Series mapping
+        #     # works on both Series and DataFrame, making it a unified alternative for element-wise operations
+        #     result = self.df.loc[rows, cols].map(func)
+        # elif func_mode == "series":
+        #     result = self.df.loc[rows, cols].apply(func)
+        # elif func_mode == "row":
+        #     result = self.df.loc[rows, cols].apply(func, axis=1)
 
         # 4.1 Force columns to object so they can accept ANY type from function
         self.df[cols] = self.df[cols].astype(object)
