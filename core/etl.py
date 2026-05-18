@@ -1,88 +1,85 @@
-from datetime import datetime
-import pandas as pd
-from utils.text import lower_text
-import os
+import datetime as dt
 import json
+import os
+import pandas as pd
+
+# datetime tags
+created_dt_tags = [
+    # "exe:timestamp", # specific, actually holds date
+    # "xmp:timestamp", # specific, actually holds date
+    # "png:exifdatetime", # specific, actually holds date
+    # "composite:gpsdatetime", # specific, actually holds date
+    # "quicktime:purchasedate", # temporary, overlap with recognised receipt json 
+    "createdate", # 18 instances
+    "creationdate", # 7 instances
+    "datetimeoriginal", # 8 instances
+    "datetimedigitized", # 3 instances
+    # "createddatetime", # 1 instance
+    # "datetimecreated", # 1 instance
+    # "encodingtime", # 2 instances
+    # "profiledatetime", # 1 instance
+    # "retaildate", # 2 instance
+    # "ripdate", # 2 instance
+    # "releasetime", # 2 instance
+    # "originalreleaseyear", # 1 instance
+]
+access_dt_tags = [
+    "accessdate",
+    "lastplayed",
+    "lastprinted",
+]
+modify_dt_tags = [
+    "datemodify", # 1 instance
+    "lastsaved", # 4 instance
+    "lastupdated" # 0 instance
+    "moddate", # 0 instance
+    "modifydate", # 17 instance
+    "metadatadate", # 2 instance
+    "sourcemodified" # 2 instance
+]
 
 # Mapping table
 EXT_MAPPING = "ref\\ext_mapping.xlsx"
 
-def get_cols_by_keywords(cols, keywords=[]):
-    target_cols = set()
-    for keyword in keywords:
-        for col in cols:
-            if keyword in col.lower():
-                target_cols.add(col)
-    return target_cols
+def select_cols_by_names(df: pd.DataFrame, names=[]):
+    
+    if not names:
+        return df.copy()
+    
+    return df.filter(items=names).copy()
+
 
 def assemble_target_path(files: list[str], target_dir: str, save_report=True) -> pd.DataFrame:
-    
-    ######   EXTRACT   ######
-    exif_meta_df = pd.read_json("db\\exif_metadata.json", orient="records").set_index("SourceFile")
-    basic_meta_df = pd.read_json("db\\basic_metadata.json", orient="index")
-    ext_mapping_df = pd.read_excel(EXT_MAPPING).set_index("FileExtension")
+    ######    INIT     ######
     master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
-
-    ######  TRANSFORM  ######
-    # Prepare exif data
-    exif_meta_df.index =  exif_meta_df.index.to_series().apply(lambda x: x.replace("/", "\\"))
-    # exif_meta_df[""] = get_earliest_created_date()
-   
-    # Indexes transform
-    exif_meta_df.index =  exif_meta_df.index.to_series().apply(lambda x: x.replace("/", "\\"))
-    ext_mapping_df.index = ext_mapping_df.index.to_series().apply(lower_text)
-    # Other transform
+    
+    # Consolidate data from different sources
     master_df = master_df.join(
         [
-            basic_meta_df[["Hash","Name","Size","ModifiedAt","Ext"]],
-            exif_meta_df[["File:FileTypeExtension",
-                          "EXIF:Model",
-                          "EXIF:GPSLatitude",
-                          "EXIF:GPSLongitude",
-                          "XML:HeadingPairs",
-                        #   "EXIF:CreateDate",
-                        #   "XML:CreateDate",
-                        #   "PDF:CreateDate",
-                        #   "FlashPix:CreateDate",
-                        #   "RTF:CreateDate",
-                        #   "QuickTime:CreateDate",
-                        #   "HTML:CreateDate",
-                        #   "ASF:CreationDate",
-                          "ID3:Year"
-                          ]]
-        ],  
-        
+            basic_meta_df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
+            exif_meta_df[["FileExtension", "CountExcelWorksheets", "AggTimestamp", "EXIF:Model"]],
+        ],
         how="left"
     )
-    master_df["isDuplicate"] = master_df["Hash"].duplicated()
-    master_df["DuplicationStatus"] = master_df["isDuplicate"].apply(lambda x: "unique" if not x else "duplicate")
-    master_df["Year"] = master_df["ModifiedAt"].apply(lambda x: datetime.fromtimestamp(x).year)
-    master_df["CountWorksheetsIdx"] = master_df["XML:HeadingPairs"].apply(
-        lambda x: next((i+1 for i, v in enumerate(x) if v in ["Worksheets", "Листы"]), "") if isinstance(x, list) else ''
-    )
-    master_df["CountWorksheets"] = master_df.apply(
-        lambda x: x["XML:HeadingPairs"][x["CountWorksheetsIdx"]] if isinstance(x["CountWorksheetsIdx"], int) else '', axis=1
-    )
-    master_df["File:FileTypeExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"]).apply(lower_text)
-    master_df = master_df.join(ext_mapping_df[["Category"]], on="File:FileTypeExtension", how="left")
+    master_df["CombinedFileExtension"] = master_df["FileExtension"].fillna(master_df["Ext"])
+    master_df = master_df.join(category_df[["Category"]], on="FileExtension", how="left")
     master_df["TargetPath"] = master_df.apply(
         lambda x: 
         os.path.join(*[str(p) for p in [
             target_dir,
-            x["DuplicationStatus"],
+            x["DuplicateStatus"],
             x["Category"],
             x["Year"],
-            x["EXIF:Model"],
-            x["File:FileTypeExtension"],
-            x["CountWorksheets"],
+            x["EXIF:Model"], 
+            x["CombinedFileExtension"],
+            x["CountExcelWorksheets"],
             x["Name"]
         ] if pd.notna(p)]), axis=1)
 
-    ######   LOAD      ######
+    ######    LOAD     ######
     if save_report:
         report_path = target_dir + "\\" + "report.csv"
         master_df.to_csv(report_path, encoding="utf-8-sig")
-    
     return master_df
 
 def calculate_coverage(json_path: str):

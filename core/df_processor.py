@@ -6,6 +6,7 @@ from typing import Type, Union, Optional, Callable, List, Tuple
 from utils.path import is_file, get_file_extension
 from utils.text import lower_text
 
+
 class EmptyDataError(Exception):
     pass
 
@@ -53,6 +54,17 @@ class DfProcessor:
 
         raw_df = pd.read_csv(path)
         self.df = self.schema.validate(raw_df)
+        self._active_mask = pd.Series(True, index=self.df.index)
+        return self
+
+    def load_json(self, path: str, orient: str | None = None):
+        if not is_file(path):
+            raise FileNotFoundError(f"Path is not a file: {path}")
+        file_extension = lower_text(get_file_extension(path))
+        if not file_extension == ".json":
+            raise ValueError(f"File extension '{file_extension}' is not supported")
+
+        raw_df = pd.read_json(path, orient=orient)
         self._active_mask = pd.Series(True, index=self.df.index)
         return self
 
@@ -104,6 +116,187 @@ class DfProcessor:
             self._active_mask &= (self.df[col] != value_to_exlude)
         return self
     
+    def sort(self, col: str):
+        self.df = self.df.sort_values(col, ascending=True)
+        return self
+    
+
+class DfProcessorEXP:
+    def __init__(self):
+        self.df = pd.DataFrame()
+        self.history = {}
+        self.cols_selection = None
+        self.rows_selection = None
+    
+    def init_schema(self, schema: pa.DataFrameModel | None = None):
+        self.schema = schema
+        schema_cols = schema.to_schema().columns.items()
+        self.df.columns = schema_cols
+        self.fields_dict = {col: col_attr.dtype.type for col, col_attr in schema.to_schema().columns.items()}
+        return self
+
+    def load_list(self, items: list, col: str):
+        if not items:
+            raise EmptyDataError("No data to process")
+        if not isinstance(items, list):
+            raise TypeError("paths should be a list")
+        
+        # Load paths
+        self.df[col] = items
+
+        return self
+    
+    def load_csv(self, path:str):
+        if not is_file(path):
+            raise FileNotFoundError(f"Path is not a file: {path}")
+        file_extension = lower_text(get_file_extension(path))
+        if not file_extension == ".csv":
+            raise ValueError(f"File extension '{file_extension}' is not supported")
+
+        self.df = pd.read_csv(path)
+
+        return self
+
+    def load_json(self, path: str, orient: str | None = None):
+        if not is_file(path):
+            raise FileNotFoundError(f"Path is not a file: {path}")
+        file_extension = lower_text(get_file_extension(path))
+        if not file_extension == ".json":
+            raise ValueError(f"File extension '{file_extension}' is not supported")
+
+        self.df = pd.read_json(path, orient=orient)
+        return self
+
+    def load_df(self, df: pd.DataFrame):
+        self.df = df
+        return self
+
+    def set_index(self, col: str):
+        self.df = self.df.set_index(col)
+        return self
+
+    def _backup(self, cols):
+        for col in cols:
+            if col not in self.history:
+                self.history[col] = []
+            self.history[col].append(self.df[col].copy)
+
+    def compute(self, func, func_mode="element", store_col = "", col_names = None, col_keywords = None, row_condition = None):
+        
+        # 1. Overrides selection attributes if criterion provided
+        self.set_cols_selection(names=col_names, keywords=col_keywords).set_rows_selection(condition=row_condition)
+
+        rows = self.rows_selection if self.rows_selection is not None else slice(None)
+        cols = self.cols_selection if self.cols_selection is not None else self.df.columns.tolist()
+
+        # 2. Execute based on mode
+        if func_mode == "element":
+            result = self.df.loc[rows, cols].map(func)
+        elif func_mode == "series":
+            result = self.df.loc[rows, cols].apply(func)
+        elif func_mode == "row":
+            result = self.df.loc[rows, cols].apply(func, axis=1)
+        
+        # 3. Assign result
+        self.df.loc[rows, store_col] = result.values
+
+        # 4. Reset selection attributes
+        if col_names is not None or col_keywords is not None:
+            self.reset_cols_selection()
+        if row_condition is not None:
+            self.reset_rows_selection()
+
+        return self
+
+    def transform(self, func, func_mode = "element", backup = True, *, col_names = None, col_keywords = None, row_condition = None):
+
+        # 1. Overrides selection attributes if criterion provided
+        self.set_cols_selection(names=col_names, keywords=col_keywords).set_rows_selection(condition=row_condition)
+
+        # 2. If row, col selection not exist, select all
+        rows = self.rows_selection if self.rows_selection is not None else slice(None)
+        cols = self.cols_selection if self.cols_selection is not None else self.df.columns.tolist()
+
+        # 2. Check if backup required
+        if backup:
+            self._backup(cols)
+
+        # 3. Execute based on mode
+        if func_mode == "element":
+            result = self.df.loc[rows, cols].map(func)
+        elif func_mode == "series":
+            result = self.df.loc[rows, cols].apply(func)
+        elif func_mode == "row":
+            result = self.df.loc[rows, cols].apply(func, axis=1)
+
+        # 4.1 Force columns to object so they can accept ANY type from function
+        self.df[cols] = self.df[cols].astype(object)
+        # 4.2 Assign result
+        self.df.loc[rows, cols] = result.values
+        # 4.3 Force Pandas to pick up most suitable datatype
+        self.df[cols] = self.df[cols].convert_dtypes()
+
+        # 5. Reset selection attributes
+        if col_names is not None or col_keywords is not None:
+            self.reset_cols_selection()
+        if row_condition is not None:
+            self.reset_rows_selection()
+
+        return self
+
+    def set_cols_selection(self, names: list[str] | None = None, keywords: list[str] | None = None):
+        
+        # Behavior: 
+            # overrides,                 if at least one 'names' or 'keywords' is provided. 
+            # preserves existing state,  if both are absent
+
+        # 1a. Exit if nothing is provided
+        if not names and not keywords:
+            return self
+        
+        # 1b. Init search criterion
+        names = names or []
+        keywords = keywords or []
+        
+        # 2. Keyword matching logic
+        cols_by_keyword = set()
+        if keywords:
+            keywords_lower = [keyword.lower() for keyword in keywords]
+            cols_lower = [col.lower() for col in self.df.columns]
+            for id, col in enumerate(cols_lower):
+                for keyword in keywords_lower:
+                    if keyword in col:
+                        cols_by_keyword.add(self.df.columns[id])
+                        break
+        
+        # 3. Update attribute
+        self.cols_selection = list(cols_by_keyword | set(names))
+        
+        return self
+
+    def set_rows_selection(self, condition = None):
+        
+        # Behavior: 
+        # overrides,                 if 'condition' provided. 
+        # preserves existing state,  if 'condition' absent
+        
+        # 1. Exit if nothing is provided
+        if not condition:
+            return self
+        
+        # 2. Update attribute
+        self.rows_selection = condition
+
+        return self
+
+    def reset_rows_selection(self):
+        self.rows_selection = None
+        return self
+
+    def reset_cols_selection(self):
+        self.cols_selection = None
+        return self
+
     def sort(self, col: str):
         self.df = self.df.sort_values(col, ascending=True)
         return self

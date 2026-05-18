@@ -5,7 +5,6 @@ import json
 import os
 from tqdm import tqdm
 from utils.path import is_file, get_file_stat
-from utils.text import split_text
 
 OFFICE_SIGS = {
     4: [
@@ -97,7 +96,7 @@ def load_json(json_path: str):
         print(f"[Error] {json_path} not found")
         return None
     except json.JSONDecodeError:
-        print(f"[Error] {json_path} is corrupted orr not a valid JSON.")
+        print(f"[Error] {json_path} is corrupted or not a valid JSON.")
         return None
     except PermissionError:
         print(f"[Error] Access denied to {json_path}")
@@ -124,6 +123,7 @@ def init_json(json_path: str, container: list | dict | None = None, encoding: st
     with open(json_path, "w", encoding=encoding) as f:
         json.dump(container, f, indent=indent)
     print(f"JSON file initialized: {json_path}")
+
 
 def get_file_hash(path, hash_algo, parts, read_cap):
     hash_func = getattr(hashlib, hash_algo)
@@ -153,15 +153,6 @@ def get_exif_metadata(batch: list[str], et, et_cfg) -> list[dict] | list:
 
 def get_batches(files: list[str], batch_size=None):
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
-
-def datetime_to_timestamp(raw_date, separator=" "):
-    if separator in raw_date:
-        date_elements = split_text(raw_date, separator=separator)
-        date_elements[0] = date_elements[0].replace(":", "-")
-        iso_date = separator.join(date_elements)
-        return datetime.datetime.fromisoformat(iso_date).timestamp()
-    iso_date = raw_date[:10].replace(":", "-") + raw_date[10:0]
-    return datetime.datetime.fromisoformat(iso_date).timestamp()
 
 def run_metadata_extraction(files: set[str], storage_cfg, exif_cfg, hash_cfg, reset_storage=False, batch_size=None):
     ########     TQDM BAR     ########
