@@ -125,7 +125,7 @@ class DfProcessorEXP:
     def __init__(self):
         self.df = pd.DataFrame()
         self.history = {}
-        self.cols_selection = None
+        self.cols_selection = []
         self.rows_selection = None
     
     def init_schema(self, schema: pa.DataFrameModel | None = None):
@@ -154,6 +154,17 @@ class DfProcessorEXP:
             raise ValueError(f"File extension '{file_extension}' is not supported")
 
         self.df = pd.read_csv(path)
+
+        return self
+
+    def load_excel(self, path:str):
+        if not is_file(path):
+            raise FileNotFoundError(f"Path is not a file: {path}")
+        # file_extension = lower_text(get_file_extension(path))
+        # if not file_extension == ".csv":
+        #     raise ValueError(f"File extension '{file_extension}' is not supported")
+
+        self.df = pd.read_excel(path)
 
         return self
 
@@ -192,13 +203,11 @@ class DfProcessorEXP:
         # works on both Series and DataFrame, making it a unified alternative for element-wise operations
 
         if func_mode == "element":              # -> receive DF will return DF
-            return subset.map(func) 
+            return subset.map(func)
         elif func_mode == "row":                # -> receive DF most probably will return pd.Series
             return subset.apply(func, axis=1)
-        elif func_mode == "col":                # -> receive DF most probably will return Scalar
+        elif func_mode == "col":                # -> receive DF most probably will return Scalar or pd.Series
             return subset.apply(func, axis=0)
-        elif func_mode == "frame":
-            return subset.apply(func)
         else:
             print(f"Incompatible func mode for pd.DataFrame {func}")
 
@@ -214,10 +223,13 @@ class DfProcessorEXP:
         subset = self.df.loc[rows, cols]
         result = self._apply_func(subset, func, func_mode)
         print(f"Subset shape is {subset.shape} and type {type(subset).__name__}, Result shape is {result.shape} and type {type(result).__name__}")
-        values_to_store = result.values
 
         # 3. Assign result
-        self.df.loc[rows, store_col] = values_to_store
+        if isinstance(result, pd.DataFrame):
+            result = result.rename(columns={result.columns[0]: store_col})
+            self.df = self.df.join(result, how="left")
+        elif isinstance(result, pd.Series):
+            self.df = self.df.join(result.rename(store_col), how="left")
 
         # 4. Reset selection attributes
         if col_names is not None or col_keywords is not None:
@@ -233,7 +245,7 @@ class DfProcessorEXP:
         self.set_cols_selection(names=col_names, keywords=col_keywords).set_rows_selection(condition=row_condition)
 
         # 2. If row, col selection not exist, select all
-        rows = self.rows_selection if self.rows_selection is not None else slice(None,None,None)
+        rows = self.rows_selection if self.rows_selection is not None else slice(None, None, None)
         cols = self.cols_selection if self.cols_selection is not None else self.df.columns.to_list()
 
         # 2. Check if backup required
@@ -244,12 +256,11 @@ class DfProcessorEXP:
         subset = self.df.loc[rows, cols]
         result = self._apply_func(subset, func, func_mode)
         print(f"Subset shape is {subset.shape} and type {type(subset).__name__}, Result shape is {result.shape} and type {type(result).__name__}")
-        values_to_store = result.values
 
         # 4.1 Force columns to object so they can accept ANY type from function
         self.df[cols] = self.df[cols].astype(object)
         # 4.2 Assign result
-        self.df.loc[rows, cols] = result.values
+        self.df.loc[rows, cols] = result
         # 4.3 Force Pandas to pick up most suitable datatype
         self.df[cols] = self.df[cols].convert_dtypes()
 
@@ -261,7 +272,7 @@ class DfProcessorEXP:
 
         return self
 
-    def set_cols_selection(self, names: list[str] | None = None, keywords: list[str] | None = None):
+    def set_cols_selection(self, names: str | list[str] = None, keywords: str | list[str] = None):
         
         # Behavior: 
             # overrides,                 if at least one 'names' or 'keywords' is provided. 
@@ -271,27 +282,43 @@ class DfProcessorEXP:
         if not names and not keywords:
             return self
         
+        # 1b. Validate data type
+        if not isinstance(names, (type(None), str, list)) or not isinstance(keywords, (type(None), str, list)):
+            raise TypeError(f"Unsupported data type provided names {type(names)}, keywords {type(keywords)}")
+        
+        # 1c. Cast input variables
+        names_set = set()
+        keywords_set = set()
+ 
         if isinstance(names, str):
-            print("DataFrame columns should be provided as list")
-            return self
+            names_set.add(names)
+        elif isinstance(names, list):
+            names_set.update(names)
 
-        # 1b. Init search criterion
-        names = names or []
-        keywords = keywords or []
+        if isinstance(keywords, str):
+            keywords_set.add(keywords)
+        elif isinstance(keywords, list):
+            keywords_set.update(keywords)
         
-        # 2. Keyword matching logic
-        cols_by_keyword = set()
-        if keywords:
-            keywords_lower = [keyword.lower() for keyword in keywords]
-            cols_lower = [col.lower() for col in self.df.columns]
-            for id, col in enumerate(cols_lower):
-                for keyword in keywords_lower:
-                    if keyword in col:
-                        cols_by_keyword.add(self.df.columns[id])
+        # 1d. Cast df columns list
+        all_cols_set = set(self.df.columns)
+
+        # 2. Matching logic
+        consolidated_cols = set()
+        if names_set:
+            names_set.intersection_update(all_cols_set) # select names available in df columns 
+            consolidated_cols.update(names_set)
+        if keywords_set:
+            for col in all_cols_set:
+                for keyword in keywords_set:
+                    if keyword.lower() in col.lower():
+                        consolidated_cols.add(col)
                         break
-        
-        # 3. Update attribute
-        self.cols_selection = list(cols_by_keyword | set(names))
+        # 3. Extend cols selection if exist
+        if self.cols_selection:
+            self.cols_selection.extend(consolidated_cols)
+        else:
+            self.cols_selection = list(consolidated_cols)
         
         return self
 
@@ -315,7 +342,7 @@ class DfProcessorEXP:
         return self
 
     def reset_cols_selection(self):
-        self.cols_selection = None
+        self.cols_selection = []
         return self
 
     def sort(self, col: str):

@@ -1,7 +1,7 @@
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
 from core.metadata import run_metadata_extraction
-from core.exif_data import DateParser, get_worksheets_count
+from core.exif_data import get_worksheets_count, get_timestamp, get_year
 from core.df_processor import DfProcessor, DfProcessorEXP
 import pandas as pd
 import sys
@@ -12,7 +12,7 @@ from utils.text import lower_text
 
 
 TARGET_DIR = "D:\\MyOrganizedFiles"
-
+SAVE_REPORT = True
 # Storage
 STORAGE_CFG = {
     "db\\exif_metadata.json": {
@@ -33,8 +33,6 @@ INCLUDE_TAGS = ["-all"]
 EXCLUDE_TAGS = ["--File:Directory"]
 EXIF_PARAMS = ["-j", "-G"]
 EXIF_CFG = [*EXIF_PARAMS, *INCLUDE_TAGS, *EXCLUDE_TAGS]
-# Mapping table
-EXT_MAPPING = "ref\\ext_mapping.xlsx"
 
 # datetime tags
 created_dt_tags = [
@@ -56,31 +54,22 @@ created_dt_tags = [
     # "releasetime", # 2 instance
     # "originalreleaseyear", # 1 instance
 ]
+access_dt_tags = [
+    "accessdate",
+    "lastplayed",
+    "lastprinted",
+]
+modify_dt_tags = [
+    "datemodify", # 1 instance
+    "lastsaved", # 4 instance
+    "lastupdated" # 0 instance
+    "moddate", # 0 instance
+    "modifydate", # 17 instance
+    "metadatadate", # 2 instance
+    "sourcemodified" # 2 instance
+]
+
 exif_cols = ["File:FileTypeExtension", "EXIF:Model", "EXIF:GPSLatitude", "EXIF:GPSLongitude", "XML:HeadingPairs", "ID3:Year"]
-
-##### DateParse #####
-# datetime patterns
-dt_patterns = {
-    "ddddsddsdd":                       "%Y{s0}%m{s1}%d",
-    "ddddsddsddwddsdd":                 "%Y{s0}%m{s1}%d %H{s2}%M",
-    "ddddsddsddwddsddl":                "%Y{s0}%m{s1}%d %H{s2}%MZ",
-    "ddddsddsddwddsddsdd":              "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S",
-    "ddddsddsddlddsddsddl":             "%Y{s0}%m{s1}%dT%H{s2}%M{s3}%SZ",
-    "ddddsddsddwddsddsddl":             "%Y{s0}%m{s1}%d %H{s2}%M{s3}%SZ",
-    "ddddsddsddwddsddsddsdd":           "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
-    "ddddsddsddwddsddsddsddd":          "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
-    "ddddsddsddwddsddsddsddsdd":        "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S%z",
-    "ddddsddsddwddsddsddsdddsddsdd":    "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z"
-}
-# datetime null patterns
-dt_nulls = ["0000:00:00 00:00:00", "0000:01:01 00:00:00", "1980:00:00 00:00:00", "1980:01:01 00:00:00"]
-# datetime parser 
-dt_parser = DateParser(dt_patterns, dt_nulls)
-
-basic_transform = {
-    "isDuplicate":          {"mode": "series", "func": lambda s: s.duplicated()},
-    "DuplicateStatus":      {"mode": "value", "func": lambda value: "original" if not value else "duplicate"}
-}
 
 def main():
     
@@ -110,39 +99,71 @@ def main():
         print(e)
     
     #########           ETL           #########
-    ######   EXTRACT   ######
-    # read exif
     try:
         exif_processor = DfProcessorEXP()
         (
             exif_processor
             .load_json("db\\exif_metadata.json", orient="records")
-            .transform(os.path.normpath, col_names=["SourceFile"])
-            .transform(lambda value: dt_parser.parse(value) if isinstance(value, str) else None, col_keywords=created_dt_tags)
-            .transform(lower_text, col_names=["File:FileTypeExtension"])
-            .compute(pd.Series.duplicated, func_mode="frame", store_col="isDuplicate", col_names=["SourceFile"])
+            .transform(os.path.normpath, col_names="SourceFile")
+            .transform(get_timestamp, col_keywords=created_dt_tags)
+            .transform(lower_text, col_names="File:FileTypeExtension")
             .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
-            .compute(lambda value: dt.datetime.fromtimestamp(value).year, store_col="Year", col_names=["AggTimestamp"])
-            .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names=["XML:HeadingPairs"])
+            .compute(get_year, store_col="Year", col_names="AggTimestamp")
+            .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
+            .set_index("SourceFile")
         )
-        print(exif_processor.df[["SourceFile", "isDuplicate", "File:FileTypeExtension", "AggTimestamp", "Year", "CountExcelWorksheets"]])
     except Exception as e:
         print(f"{e} while processing exif")
     
     # read basic
     try:
-        basic_meta_df = pd.read_json("db\\basic_metadata.json", orient="index")
+        basic_processor = DfProcessorEXP()
+        (
+            basic_processor
+            .load_json("db\\basic_metadata.json", orient="index")
+            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
+            .compute(lambda value: "original" if not value else "duplicate", store_col="DuplicateStatus", col_names="isDuplicate")
+        )
     except Exception as e:
         print(e)
 
     # read category mapping
     try:
-        category_df = pd.read_excel(EXT_MAPPING, index_col="FileExtension")
+        category_processor = DfProcessorEXP()
+        (
+            category_processor
+            .load_excel("ref\\ext_mapping.xlsx")
+            .transform(lower_text, col_names="FileExtension")
+            .set_index("FileExtension")
+        )
     except Exception as e:
         print(e)
 
     try:
-        master_df = pd.DataFrame()
+        master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
+        master_df = master_df.join([
+            basic_processor.df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
+            exif_processor.df[["File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model"]]
+        ],
+        how="left"
+        )
+        master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"])
+        master_df = pd.merge(master_df, category_processor.df[["Category"]], how="left", left_on="CombinedFileExtension", right_index=True)
+        master_df["TargetPath"] = master_df.apply(
+            lambda x: 
+            os.path.join(*[str(p) for p in [
+                TARGET_DIR,
+                x["DuplicateStatus"],
+                x["Category"],
+                x["Year"],
+                x["EXIF:Model"], 
+                x["CombinedFileExtension"],
+                x["CountExcelWorksheets"],
+                x["Name"]
+            ] if pd.notna(p)]), axis=1)
+        if SAVE_REPORT:
+            report_path = TARGET_DIR + "\\" + "report.csv"
+            master_df.to_csv(report_path, encoding="utf-8-sig")
     except Exception as e:
         print(e)
     
