@@ -5,13 +5,11 @@ from core.exif_data import get_worksheets_count, get_timestamp, get_year
 from core.df_processor import DfProcessor, DfProcessorEXP
 import pandas as pd
 import sys
-import datetime as dt
 import os
 import shutil
 from utils.text import lower_text
 
-
-TARGET_DIR = "D:\\MyOrganizedFiles"
+TARGET_DIR = "D:\\MyOrganizedFiles\\"
 SAVE_REPORT = True
 # Storage
 STORAGE_CFG = {
@@ -70,6 +68,10 @@ modify_dt_tags = [
 ]
 
 exif_cols = ["File:FileTypeExtension", "EXIF:Model", "EXIF:GPSLatitude", "EXIF:GPSLongitude", "XML:HeadingPairs", "ID3:Year"]
+taget_path_cols = ["DuplicateStatus", "Category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "Name"]
+
+def label_duplicate(value):
+    return "duplicate" if value else "original"
 
 def main():
     
@@ -122,7 +124,7 @@ def main():
             basic_processor
             .load_json("db\\basic_metadata.json", orient="index")
             .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
-            .compute(lambda value: "original" if not value else "duplicate", store_col="DuplicateStatus", col_names="isDuplicate")
+            .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
         )
     except Exception as e:
         print(e)
@@ -149,18 +151,7 @@ def main():
         )
         master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"])
         master_df = pd.merge(master_df, category_processor.df[["Category"]], how="left", left_on="CombinedFileExtension", right_index=True)
-        master_df["TargetPath"] = master_df.apply(
-            lambda x: 
-            os.path.join(*[str(p) for p in [
-                TARGET_DIR,
-                x["DuplicateStatus"],
-                x["Category"],
-                x["Year"],
-                x["EXIF:Model"], 
-                x["CombinedFileExtension"],
-                x["CountExcelWorksheets"],
-                x["Name"]
-            ] if pd.notna(p)]), axis=1)
+        master_df["TargetPath"] = master_df[taget_path_cols].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
         if SAVE_REPORT:
             report_path = TARGET_DIR + "\\" + "report.csv"
             master_df.to_csv(report_path, encoding="utf-8-sig")

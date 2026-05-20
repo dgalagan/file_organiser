@@ -1,12 +1,13 @@
 from cli.assets import Delimiter, Emoji, Icon, Template
 from cli.renderer import render_cli_object, render_cli_grouped_object
-from core.df_processor import DfProcessor, EmptyDataError
+from core.df_processor import DfProcessorEXP, DfProcessor, EmptyDataError
 from enum import StrEnum, auto
 import os
 os.environ["DISABLE_PANDERA_IMPORT_WARNING"] = "True"
 import pandera as pa
 from pandera.typing import Series
 from pandas.errors import ParserError
+import pandas as pd
 from typing import Optional
 from utils.path import is_not_dir, is_parent, get_normalized_path, get_dir_depth, get_branch_depth, clean_dir
 from utils.text import lower_text, strip_text
@@ -92,6 +93,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             # Open CSV
             try:
                 processor = DfProcessor(DirPathSchema, CALCULATION_LOGIC_REGISTRY).load_csv(csv_path)
+                processor_exp = DfProcessorEXP().load_csv(csv_path)
             except (ValueError, FileNotFoundError, PermissionError, EmptyDataError, ParserError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
@@ -114,6 +116,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 return None, MenuActions.INTERUPT
             try:
                 processor = DfProcessor(DirPathSchema, CALCULATION_LOGIC_REGISTRY).load_list(input_dirs, col=DirPathSchema.DirPath)
+                processor_exp = DfProcessorEXP().load_list(input_dirs, col="DirPath")
             except (TypeError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
                 continue
@@ -123,6 +126,18 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             return None, MenuActions.FAILED
         # Normalize and enrich loaded data
         # print(Delimiter.DASH.repeat(80))
+        (
+            processor_exp
+            .transform(get_normalized_path, col_names="DirPath")
+            .compute(is_not_dir, store_col="isInvalid",  col_names="DirPath")
+            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="DirPath")
+            .set_rows_selection(condition=lambda df: ~df["isInvalid"] & ~df["isDuplicate"])
+            .compute(get_dir_depth, store_col="DirDepth", col_names="DirPath")
+            .compute(get_branch_depth, store_col="BranchDepth", col_names="DirPath")
+            .compute(lambda row: row["BranchDepth"] - row["DirDepth"], func_mode="row", store_col="BranchDepthFromDir", col_names=["BranchDepth", "DirDepth"])
+            .reset_rows_selection()
+        )
+        print(processor_exp.df)
         (
             processor
             .transform(

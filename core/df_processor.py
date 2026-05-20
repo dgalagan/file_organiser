@@ -333,7 +333,8 @@ class DfProcessorEXP:
             return self
         
         # 2. Update attribute
-        self.rows_selection = condition
+        if callable(condition):
+            self.rows_selection = condition(self.df)
 
         return self
 
