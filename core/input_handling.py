@@ -1,14 +1,10 @@
 from cli.assets import Delimiter, Emoji, Icon, Template
 from cli.renderer import render_cli_object, render_cli_grouped_object
-from core.df_processor import DfProcessorEXP, DfProcessor, EmptyDataError
+from core.df_processor import DfProcessorEXP, EmptyDataError
 from enum import StrEnum, auto
 import os
-os.environ["DISABLE_PANDERA_IMPORT_WARNING"] = "True"
-import pandera as pa
-from pandera.typing import Series
 from pandas.errors import ParserError
 import pandas as pd
-from typing import Optional
 from utils.path import is_not_dir, is_parent, get_normalized_path, get_dir_depth, get_branch_depth, clean_dir
 from utils.text import lower_text, strip_text
 import sys
@@ -18,30 +14,6 @@ import sys
 # self-reporting improvement
 # review error handling
 # clean up cli objects
-
-# Schema
-class DirPathSchema(pa.DataFrameModel):
-    DirPath: Series[str] = pa.Field(coerce=True)
-    isInvalid: Optional[Series[bool]] = pa.Field(nullable=True)
-    isDuplicate: Optional[Series[bool]] = pa.Field(nullable=True)
-    DirDepth: Optional[Series["Int64"]] = pa.Field(ge=0, nullable=True)
-    BranchDepth: Optional[Series["Int64"]] = pa.Field(ge=0, nullable=True)
-    BranchDepthFromDir: Optional[Series["Int64"]] = pa.Field(ge=0, nullable=True)
-    UserInputDepth: Optional[Series["Int64"]] = pa.Field(ge=0, nullable=True)
-    ProcessingDepth: Optional[Series["Int64"]] = pa.Field(ge=0, nullable=True)
-    
-    class Config:
-        strict = True
-        coerce = True
-
-CALCULATION_LOGIC_REGISTRY = {
-    DirPathSchema.DirPath: lambda df, src: df[src[0]].apply(get_normalized_path),
-    DirPathSchema.isInvalid: lambda df, src: df[src[0]].apply(is_not_dir),
-    DirPathSchema.isDuplicate: lambda df, src: df[src[0]].duplicated(),
-    DirPathSchema.DirDepth: lambda df, src: df[src[0]].apply(get_dir_depth),
-    DirPathSchema.BranchDepth: lambda df, src: df[src[0]].apply(get_branch_depth),
-    DirPathSchema.BranchDepthFromDir: lambda df, src: df[src[0]] - df[src[1]]
-}
 
 # Actions
 class MenuActions(StrEnum):
@@ -92,7 +64,6 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 return None, MenuActions.INTERUPT
             # Open CSV
             try:
-                processor = DfProcessor(DirPathSchema, CALCULATION_LOGIC_REGISTRY).load_csv(csv_path)
                 processor_exp = DfProcessorEXP().load_csv(csv_path)
             except (ValueError, FileNotFoundError, PermissionError, EmptyDataError, ParserError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
@@ -115,7 +86,6 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 print()
                 return None, MenuActions.INTERUPT
             try:
-                processor = DfProcessor(DirPathSchema, CALCULATION_LOGIC_REGISTRY).load_list(input_dirs, col=DirPathSchema.DirPath)
                 processor_exp = DfProcessorEXP().load_list(input_dirs, col="DirPath")
             except (TypeError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
@@ -135,42 +105,18 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             .compute(get_dir_depth, store_col="DirDepth", col_names="DirPath")
             .compute(get_branch_depth, store_col="BranchDepth", col_names="DirPath")
             .compute(lambda row: row["BranchDepth"] - row["DirDepth"], func_mode="row", store_col="BranchDepthFromDir", col_names=["BranchDepth", "DirDepth"])
-            .reset_rows_selection()
-        )
-        print(processor_exp.df)
-        (
-            processor
-            .transform(
-                pipeline=[
-                    (DirPathSchema.DirPath, None),
-                    (DirPathSchema.DirPath, DirPathSchema.isInvalid),
-                    (DirPathSchema.DirPath, DirPathSchema.isDuplicate)
-                ]
-            )
-            .filter(
-                pipeline=[
-                    (DirPathSchema.isInvalid, True),
-                    (DirPathSchema.isDuplicate, True)
-                ]
-            )
-            .transform(
-                pipeline=[
-                    (DirPathSchema.DirPath, DirPathSchema.DirDepth),
-                    (DirPathSchema.DirPath, DirPathSchema.BranchDepth),
-                    ([DirPathSchema.BranchDepth, DirPathSchema.DirDepth], DirPathSchema.BranchDepthFromDir)
-                ]
-            )
-            .sort(DirPathSchema.DirDepth)
+            .sort(col="DirDepth")
         )
         # Get data
-        dir_data = processor.active_df
+        dir_data = processor_exp.active_selection
+        print(dir_data)
         # Resolve parent-child relationship
         reload = False
         processed_dirs = []
         for idx, row in dir_data.iterrows():
-            dir_path = row[DirPathSchema.DirPath]
-            dir_depth = row[DirPathSchema.DirDepth]
-            branch_depth_from_dir = row[DirPathSchema.BranchDepthFromDir]
+            dir_path = row["DirPath"]
+            dir_depth = row["DirDepth"]
+            branch_depth_from_dir = row["BranchDepthFromDir"]
             # CLI element
             print(Delimiter.DASH.repeat(80))
             print(render_cli_object(cli_objects["info"], "processing", dir_path=dir_path))
@@ -180,7 +126,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             # Check if parent cover scope of dir in processig
             scope_overlap = False
             for parent in parents:
-                defined_depth = dir_data[DirPathSchema.ProcessingDepth].loc[dir_data[DirPathSchema.DirPath]==parent].item()
+                defined_depth = dir_data["ProcessingDepth"].loc[dir_data["DirPath"]==parent].item()
                 if dir_depth <= defined_depth:
                     scope_overlap = True
                     break
@@ -200,13 +146,13 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                     reload = True
                     break
                 case MenuActions.SUCCESS:
-                    dir_data.at[idx, DirPathSchema.UserInputDepth] = depth_input
-                    dir_data.at[idx, DirPathSchema.ProcessingDepth] = dir_depth + depth_input
+                    dir_data.at[idx, "UserInputDepth"] = depth_input
+                    dir_data.at[idx, "ProcessingDepth"] = dir_depth + depth_input
                     processed_dirs.append(dir_path)
         if reload:
             continue
         
-        selected_dirs = list(dir_data[[DirPathSchema.DirPath, DirPathSchema.ProcessingDepth]].dropna().itertuples(index=False, name=None))
+        selected_dirs = list(dir_data[["DirPath", "ProcessingDepth"]].dropna().itertuples(index=False, name=None))
         
         if not selected_dirs:
             print(render_cli_object(cli_objects["warning"], "empty_input"))

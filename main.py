@@ -2,7 +2,7 @@ from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
 from core.metadata import run_metadata_extraction
 from core.exif_data import get_worksheets_count, get_timestamp, get_year
-from core.df_processor import DfProcessor, DfProcessorEXP
+from core.df_processor import DfProcessorEXP
 import pandas as pd
 import sys
 import os
