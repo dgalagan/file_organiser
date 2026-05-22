@@ -95,7 +95,6 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
         # Normalize and enrich loaded data
-        # print(Delimiter.DASH.repeat(80))
         (
             processor_exp
             .transform(get_normalized_path, col_names="DirPath")
@@ -110,7 +109,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
         # Get data
         dir_data = processor_exp.active_selection
         print(dir_data)
-        # Resolve parent-child relationship
+        # Resolve parent-child relationship clash
         reload = False
         processed_dirs = []
         for idx, row in dir_data.iterrows():
@@ -126,7 +125,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             # Check if parent cover scope of dir in processig
             scope_overlap = False
             for parent in parents:
-                defined_depth = dir_data["ProcessingDepth"].loc[dir_data["DirPath"]==parent].item()
+                defined_depth = dir_data.loc[dir_data["DirPath"]==parent, "ProcessingDepth"].item()
                 if dir_depth <= defined_depth:
                     scope_overlap = True
                     break
@@ -135,7 +134,6 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 print(render_cli_object(cli_objects["info"], "skipped"))
                 continue
             # Get user input on depth
-        
             depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth_from_dir)
             match in_action:
                 case MenuActions.SKIP:
