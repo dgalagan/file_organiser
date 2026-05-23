@@ -1,4 +1,3 @@
-import os
 import pandas as pd
 from utils.path import is_file, get_file_extension
 from utils.text import lower_text
@@ -10,7 +9,7 @@ from utils.text import lower_text
 class EmptyDataError(Exception):
     pass
 
-class DfProcessorEXP:
+class DfProcessor:
     def __init__(self):
         self.df = pd.DataFrame()
         self.history = {}

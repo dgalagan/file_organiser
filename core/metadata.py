@@ -1,129 +1,9 @@
-import datetime
 from exiftool import ExifTool
 import hashlib
-import json
 import os
 from tqdm import tqdm
+from utils.json import init_json, load_json, load_json_str, save_json
 from utils.path import is_file, get_file_stat
-
-OFFICE_SIGS = {
-    4: [
-        "504B0304",         # DOCX|PPTX|XLSX
-        "FDFFFFFF10",       # XLS
-        "FDFFFFFF22",       # XLS
-        "FDFFFFFF23",       # XLS
-        "FDFFFFFF28",       # XLS
-        "FDFFFFFF29",       # XLS
-        "FDFFFFFF1F",       # XLS
-        "0D444F43",         # DOC
-        "DBA52D00",         # DOC
-        "ECA5C100",         # DOC
-        "0F00E803",         # PPT    
-        "006E1EF0",         # PPT
-        "A0461DF0",         # PPT
-    ],
-    8: [
-        "D0CF11E0A1B11AE1", # DOC|DOT|PPS|PPT|XLA|XLS|WIZ
-        "504B030414000600", # DOCX|PPTX|XLSX
-        "0908100000060500", # XLS
-        "CF11E0A1B11AE100", # DOC
-        "FDFFFFFF0E000000", # PPT
-        "FDFFFFFF1C000000", # PPT
-        "FDFFFFFF43000000", # PPT
-    ]
-}
-PDF_SIGS = {
-    4: ["25504446"]
-}
-MP3_SIGS = {
-    2: ["FFFB", "FFF3", "FFF2"],
-    3: ["494433"]
-}
-AVI_SIGS = {
-    4: ["52494646"],
-    8: ["415649204C495354"]
-}
-JPG_SIGS = {
-    2: ["FFD8"],
-    3: ["FFD8FF"],
-}
-ZIP_SIGS = {
-    4: ["504B0304", "504B0506", "504B0708", "504B0304"],
-    5: ["504B537058"],
-    6: ["504B4C495445", "57696E5A6970"],
-    8: ["504B030414000100"]
-}
-TAR_SIGS = {
-    8: ["7573746172003030", "7573746172202000"]
-}
-CHECK_EXT = {
-    ".xls": OFFICE_SIGS,
-    ".xlsx": OFFICE_SIGS,
-    ".xlsm": OFFICE_SIGS,
-    ".xlsb": OFFICE_SIGS,
-    ".doc": OFFICE_SIGS,
-    ".docx": OFFICE_SIGS,
-    ".ppt": OFFICE_SIGS,
-    ".pptx": OFFICE_SIGS,
-    ".pptm": OFFICE_SIGS,
-    ".potx": OFFICE_SIGS,
-    ".msg": OFFICE_SIGS,
-    ".pdf": PDF_SIGS,
-    ".avi": AVI_SIGS,
-    ".jpg": JPG_SIGS,
-    ".jpeg": JPG_SIGS,
-    ".zip": ZIP_SIGS,
-    ".tar": TAR_SIGS,
-}
-EXCL_EXT = [
-    ".ac3",     # The first two octets of an AC-3 frame are always the synchronization word, which has the hex value 0x0B77
-    ".srt",
-    ".mrimgx",  # Macrium uses zstandard compression https://kbx.macrium.com/sitemanagerplatform/sitemanager-platform-new-features
-    ".cached",
-    ".tmp"
-]
-TXT_EXT = [
-    ".txt",
-    ".md",
-    ".ini",
-]
-
-def load_json(json_path: str):
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        print(f"[Error] {json_path} not found")
-        return None
-    except json.JSONDecodeError:
-        print(f"[Error] {json_path} is corrupted or not a valid JSON.")
-        return None
-    except PermissionError:
-        print(f"[Error] Access denied to {json_path}")
-        return None
-    except Exception as e:
-        print(f"Unexpected error occurred: {e}")
-        return None
-
-def save_json(json_path: str, json_data: dict):
-    try:
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(json_data, f, indent=4, ensure_ascii=False)
-            print(f"{json_path} saved successfully!")
-    except PermissionError:
-        print(f"[Error] You don't have permission to write to {json_path}")
-    except TypeError as e:
-        print(f"[Error] Data contains non-JSON serializable objects: {e}")
-    except OSError as e:
-        print(f"[Error] System/Disk error occurred: {e}")
-    except Exception as e:
-        print(f"Unexpected error occurred: {e}")
-
-def init_json(json_path: str, container: list | dict | None = None, encoding: str | None = None, indent: int = 4) -> None:
-    with open(json_path, "w", encoding=encoding) as f:
-        json.dump(container, f, indent=indent)
-    print(f"JSON file initialized: {json_path}")
-
 
 def get_file_hash(path, hash_algo, parts, read_cap):
     hash_func = getattr(hashlib, hash_algo)
@@ -145,8 +25,7 @@ def get_file_hash(path, hash_algo, parts, read_cap):
 def get_exif_metadata(batch: list[str], et, et_cfg) -> list[dict] | list:
     try:
         raw_output = et.execute(*et_cfg, *batch)
-        batch_results = json.loads(raw_output)
-        return batch_results
+        return load_json_str(raw_output)
     except Exception as e:
         print(e)
         return []

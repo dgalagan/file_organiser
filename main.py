@@ -1,11 +1,11 @@
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
 from core.metadata import run_metadata_extraction
-from core.exif_data import get_worksheets_count, get_timestamp, get_year
-from core.df_processor import DfProcessorEXP
+from core.exif_data import DateParser, get_worksheets_count, get_year
+from core.df_processor import DfProcessor
+import os
 import pandas as pd
 import sys
-import os
 import shutil
 from utils.text import lower_text
 
@@ -67,8 +67,8 @@ modify_dt_tags = [
     "sourcemodified" # 2 instance
 ]
 
-exif_cols = ["File:FileTypeExtension", "EXIF:Model", "EXIF:GPSLatitude", "EXIF:GPSLongitude", "XML:HeadingPairs", "ID3:Year"]
-taget_path_cols = ["DuplicateStatus", "Category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "Name"]
+
+target_path_features = ["DuplicateStatus", "category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "Name"]
 
 def label_duplicate(value):
     return "duplicate" if value else "original"
@@ -102,16 +102,17 @@ def main():
     
     #########           ETL           #########
     try:
-        exif_processor = DfProcessorEXP()
+        exif_processor = DfProcessor()
         (
             exif_processor
             .load_json("db\\exif_metadata.json", orient="records")
             .transform(os.path.normpath, col_names="SourceFile")
-            .transform(get_timestamp, col_keywords=created_dt_tags)
+            .transform(DateParser().parse, col_keywords=created_dt_tags)
             .transform(lower_text, col_names="File:FileTypeExtension")
             .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
             .compute(get_year, store_col="Year", col_names="AggTimestamp")
             .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
+            # .compute(get_worksheets_count, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
             .set_index("SourceFile")
         )
     except Exception as e:
@@ -119,7 +120,7 @@ def main():
     
     # read basic
     try:
-        basic_processor = DfProcessorEXP()
+        basic_processor = DfProcessor()
         (
             basic_processor
             .load_json("db\\basic_metadata.json", orient="index")
@@ -131,27 +132,26 @@ def main():
 
     # read category mapping
     try:
-        category_processor = DfProcessorEXP()
+        category_processor = DfProcessor()
         (
             category_processor
-            .load_excel("ref\\ext_mapping.xlsx")
-            .transform(lower_text, col_names="FileExtension")
-            .set_index("FileExtension")
+            .load_json("db\\extension_metadata.json", orient="index")
         )
     except Exception as e:
         print(e)
 
     try:
         master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
-        master_df = master_df.join([
-            basic_processor.df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
-            exif_processor.df[["File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model"]]
-        ],
-        how="left"
+        master_df = master_df.join(
+            [
+                basic_processor.df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
+                exif_processor.df[["File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model", "ID3:Year"]]
+            ],
+            how="left"
         )
         master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"])
-        master_df = pd.merge(master_df, category_processor.df[["Category"]], how="left", left_on="CombinedFileExtension", right_index=True)
-        master_df["TargetPath"] = master_df[taget_path_cols].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
+        master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
+        master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
         if SAVE_REPORT:
             report_path = TARGET_DIR + "\\" + "report.csv"
             master_df.to_csv(report_path, encoding="utf-8-sig")

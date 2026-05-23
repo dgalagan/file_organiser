@@ -1,5 +1,5 @@
-import json
 import datetime as dt
+import json
 from utils.text import get_chars_pattern
 
 class DateParser:
@@ -27,18 +27,23 @@ class DateParser:
         self.summary = {dt_pattern: [0, 0] for dt_pattern in self.dt_patterns}
 
     def parse(self, dt_str: str):
-        # Ensure dt is not null
+        # Validate that the input is a valid string
+        if not isinstance(dt_str, str):
+            return None
+        
+        # Reject known null-equivalent or placeholder strings
         if dt_str in self.dt_nulls:
             return None
         
-        # Extract chars pattern
+        # Parse the string into its structural character pattern and separators
         chars_pattern, sep_args = get_chars_pattern(dt_str)
         
+        # Log unvalidated patterns and skip processing if the format is unrecognized
         if chars_pattern not in self.dt_patterns:
             self.unknown_patterns.add(chars_pattern)
             return None
         
-        # Convert dt into timestamp
+        # Dynamically build the datetime format string and parse it into a Unix timestamp
         try:
             dt_strf = self.dt_patterns[chars_pattern].format(**sep_args)
             timestamp = dt.datetime.strptime(dt_str, dt_strf).timestamp()
@@ -48,11 +53,6 @@ class DateParser:
             self.dt_failed.append(dt_str)
             self.summary[chars_pattern][1] += 1 
             return None
-
-def get_timestamp(date: str):
-    if not isinstance(date, str):
-        return None
-    return DateParser().parse(date)
 
 def get_year(timestamp: float) -> int:
     return dt.datetime.fromtimestamp(timestamp).year

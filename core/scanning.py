@@ -1,5 +1,4 @@
 import os
-from tqdm import tqdm
 from utils.path import iter_dir_hierarchy
 
 def get_scope(input_dirs: list[str]):
