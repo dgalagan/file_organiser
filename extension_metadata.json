@@ -1,0 +1,945 @@
+{
+    "doc": {
+        "magic_number": {
+            "4": [
+                "0D444F43",
+                "DBA52D00",
+                "ECA5C100"
+            ],
+            "8": [
+                "CF11E0A1B11AE100",
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "category": "Documents-Word",
+        "description": "Microsoft Word 97–2003 Document",
+        "software": "Microsoft Word"
+    },
+    "docx": {
+        "magic_number": {
+            "4": [
+                "504B0304"
+            ],
+            "8": [
+                "504B030414000600"
+            ]
+        },
+        "category": "Documents-Word",
+        "description": "Microsoft Word Open XML Document",
+        "software": "Microsoft Word"
+    },
+    "dot": {
+        "magic_number": {
+            "8": [
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "category": "",
+        "description": "",
+        "software": ""
+    },
+    "wiz": {
+        "magic_number": {
+            "8": [
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "software": "",
+        "description": "",
+        "category": ""
+    },
+    "ppt": {
+        "magic_number": {
+            "4": [
+                "0F00E803",
+                "006E1EF0",
+                "A0461DF0"
+            ],
+            "8": [
+                "FDFFFFFF43000000",
+                "FDFFFFFF1C000000",
+                "FDFFFFFF0E000000",
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "software": "Microsoft Power Point",
+        "description": "Microsoft PowerPoint 97–2003 Presentation",
+        "category": "Data-PowerPoint"
+    },
+    "pptx": {
+        "magic_number": {
+            "4": [
+                "504B0304"
+            ],
+            "8": [
+                "504B030414000600"
+            ]
+        },
+        "software": "Microsoft Power Point",
+        "description": "Microsoft PowerPoint Open XML Presentation",
+        "category": "Data-PowerPoint"
+    },
+    "pps": {
+        "magic_number": {
+            "8": [
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "software": "",
+        "description": "",
+        "category": ""
+    },
+    "xls": {
+        "magic_number": {
+            "5": [
+                "FDFFFFFF10",
+                "FDFFFFFF22",
+                "FDFFFFFF23",
+                "FDFFFFFF28",
+                "FDFFFFFF29",
+                "FDFFFFFF1F"
+            ],
+            "8": [
+                "0908100000060500",
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "software": "Microsoft Excel",
+        "description": "Microsoft Excel 97–2003 Workbook",
+        "category": "Data-Excel"
+    },
+    "xlsx": {
+        "magic_number": {
+            "4": [
+                "504B0304"
+            ],
+            "8": [
+                "504B030414000600"
+            ]
+        },
+        "software": "Microsoft Excel",
+        "description": "Microsoft Excel Open XML Spreadsheet",
+        "category": "Data-Excel"
+    },
+    "xla": {
+        "magic_number": {
+            "8": [
+                "D0CF11E0A1B11AE1"
+            ]
+        },
+        "software": "",
+        "description": "",
+        "category": ""
+    },
+    "pdf": {
+        "magic_number": {
+            "4": [
+                "25504446"
+            ]
+        },
+        "software": "Adobe Acrobat, Foxit Reader, Preview, Web Browsers",
+        "description": "Portable Document Format",
+        "category": "Documents-PDF"
+    },
+    "mp3": {
+        "magic_number": {
+            "2": [
+                "FFFB",
+                "FFF3",
+                "FFF2"
+            ],
+            "3": [
+                "494433"
+            ]
+        },
+        "software": "VLC, Windows Media Player",
+        "description": "MPEG-1 Audio Layer III",
+        "category": "Audio"
+    },
+    "avi": {
+        "magic_number": {
+            "4": [
+                "52494646"
+            ],
+            "8": [
+                "415649204C495354"
+            ]
+        },
+        "software": "VLC, Windows Media Player, Media Player Classic",
+        "description": "Audio Video Interleave",
+        "category": "Video"
+    },
+    "jpg": {
+        "magic_number": {
+            "2": [
+                "FFD8"
+            ],
+            "3": [
+                "FFD8FF"
+            ]
+        },
+        "software": "Paint, Photoshop, Windows Photos, Preview",
+        "description": "Joint Photographic Experts Group",
+        "category": "Image"
+    },
+    "zip": {
+        "magic_number": {
+            "4": [
+                "504B0304",
+                "504B0506",
+                "504B0708",
+                "504B0304"
+            ],
+            "5": [
+                "504B537058"
+            ],
+            "6": [
+                "504B4C495445",
+                "57696E5A6970"
+            ],
+            "8": [
+                "504B030414000100"
+            ]
+        },
+        "software": "WinRAR, 7-Zip, Windows Explorer",
+        "description": "ZIP Archive",
+        "category": "Archive"
+    },
+    "tar": {
+        "magic_number": {
+            "8": [
+                "7573746172003030",
+                "7573746172202000"
+            ]
+        },
+        "software": "WinRAR, 7-Zip, Linux tar command",
+        "description": "Tape Archive",
+        "category": "Archive"
+    },
+    "ac3": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Audio Codec 3",
+        "category": "Audio"
+    },
+    "srt": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "SubRip Subtitle file",
+        "category": "Video"
+    },
+    "mrimgx": {
+        "magic_number": {},
+        "software": "Macrium Reflect",
+        "description": "Disk Image",
+        "category": "System Backup"
+    },
+    "cached": {
+        "magic_number": {},
+        "software": "Games",
+        "description": "Cache File",
+        "category": "Application Specific"
+    },
+    "tmp": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Temporary File",
+        "category": "Other"
+    },
+    "txt": {
+        "magic_number": {},
+        "software": "Any Text Editor",
+        "description": "Plain Text File",
+        "category": "Documents-Text"
+    },
+    "md": {
+        "magic_number": {},
+        "software": "Any Text Editor",
+        "description": "Markdown file",
+        "category": "Documents-Text"
+    },
+    "ini": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Initialization File",
+        "category": "Application Specific"
+    },
+    "7z": {
+        "magic_number": {},
+        "software": "7-Zip",
+        "description": "7-Zip Compressed Archive",
+        "category": "Archive"
+    },
+    "a6r": {
+        "magic_number": {},
+        "software": "Quiz Interactive App",
+        "description": "Authorware Runtime",
+        "category": "Application Specific"
+    },
+    "act": {
+        "magic_number": {},
+        "software": "Games",
+        "description": "Other",
+        "category": "Application Specific"
+    },
+    "axd": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "ASP.NET Web Handler files",
+        "category": "Other"
+    },
+    "bib": {
+        "magic_number": {},
+        "software": "LaTeX editors (TeXstudio, Overleaf), JabRef",
+        "description": "BibTeX bibliography file",
+        "category": "Documents-BIB"
+    },
+    "bin": {
+        "magic_number": {},
+        "software": "Various",
+        "description": "Binary File",
+        "category": "Application Specific"
+    },
+    "bmp": {
+        "magic_number": {},
+        "software": "Paint, Photoshop, Windows Photos, Preview",
+        "description": "Bitmap Image File",
+        "category": "Image"
+    },
+    "boot": {
+        "magic_number": {},
+        "software": "Linux",
+        "description": "Boot Configuration",
+        "category": "Application Specific"
+    },
+    "c32": {
+        "magic_number": {},
+        "software": "Linux",
+        "description": "Linux System File",
+        "category": "Application Specific"
+    },
+    "cat": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Security Catalog File",
+        "category": "Application Specific"
+    },
+    "cfg": {
+        "magic_number": {},
+        "software": "Any Text Editor",
+        "description": "Configuration File",
+        "category": "Config"
+    },
+    "code-workspace": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "Other",
+        "category": "Config"
+    },
+    "com": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Executable Command",
+        "category": "Application Specific"
+    },
+    "conf": {
+        "magic_number": {},
+        "software": "Any Text Editor",
+        "description": "Configuration File",
+        "category": "Config"
+    },
+    "cpk": {
+        "magic_number": {},
+        "software": "Games",
+        "description": "CRI Middleware Package File",
+        "category": "Application Specific"
+    },
+    "crc": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "cs": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "C# Source File",
+        "category": "Script"
+    },
+    "css": {
+        "magic_number": {},
+        "software": "Any Text Editor",
+        "description": "Cascading Style Sheet",
+        "category": "Web Page Style"
+    },
+    "csv": {
+        "magic_number": {},
+        "software": "Microsoft Excel",
+        "description": "Comma-Separated Values",
+        "category": "Data-Excel"
+    },
+    "dat": {
+        "magic_number": {},
+        "software": "Games",
+        "description": "Data File",
+        "category": "Application Specific"
+    },
+    "db": {
+        "magic_number": {},
+        "software": "SQLite",
+        "description": "Database File",
+        "category": "Database"
+    },
+    "desktop": {
+        "magic_number": {},
+        "software": "Linux",
+        "description": "Linux Shortcut / Launcher",
+        "category": "Application Specific"
+    },
+    "djvu": {
+        "magic_number": {},
+        "software": "DjVu Viewer, SumatraPDF",
+        "description": "DjVu files",
+        "category": "Ebook"
+    },
+    "dll": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Dynamic Link Library",
+        "category": "Application Specific"
+    },
+    "dotm": {
+        "magic_number": {},
+        "software": "Microsoft Word",
+        "description": "Microsoft Word Macro-Enabled Template",
+        "category": "Word Document"
+    },
+    "download": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "eml": {
+        "magic_number": {},
+        "software": "Microsoft Outlook",
+        "description": "Email Message File",
+        "category": "Email"
+    },
+    "epub": {
+        "magic_number": {},
+        "software": "Calibre, Adobe Digital Editions",
+        "description": "Electronic Publication",
+        "category": "Ebook"
+    },
+    "etl": {
+        "magic_number": {},
+        "software": "OS Inspection",
+        "description": "Event Trace Log",
+        "category": "Application Specific"
+    },
+    "exe": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Executable Command",
+        "category": "Application Specific"
+    },
+    "flac": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Free Lossless Audio Codec",
+        "category": "Audio"
+    },
+    "flv": {
+        "magic_number": {},
+        "software": "VLC, Adobe Flash Player",
+        "description": "Flash Video",
+        "category": "Video"
+    },
+    "fps": {
+        "magic_number": {},
+        "software": "Microsoft Outlook",
+        "description": "Personal Storage Table (Outlook Data File)",
+        "category": "Email"
+    },
+    "fpx": {
+        "magic_number": {},
+        "software": "Microsoft Outlook",
+        "description": "Personal Storage Table (Outlook Data File)",
+        "category": "Email"
+    },
+    "gif": {
+        "magic_number": {},
+        "software": "Paint, Photoshop, Windows Photos, Preview",
+        "description": "Graphics Interchange Format",
+        "category": "Image"
+    },
+    "gz": {
+        "magic_number": {},
+        "software": "WinRAR, 7-Zip, Gzip",
+        "description": "Gzip Compressed Archive",
+        "category": "Archive"
+    },
+    "heic": {
+        "magic_number": {},
+        "software": "Paint, Photoshop, Windows Photos, Preview",
+        "description": "High Efficiency Image Container",
+        "category": "Image"
+    },
+    "htm": {
+        "magic_number": {},
+        "software": "Web Browsers",
+        "description": "HyperText Markup",
+        "category": "Web Page"
+    },
+    "html": {
+        "magic_number": {},
+        "software": "Web Browsers",
+        "description": "HyperText Markup Language",
+        "category": "Web Page"
+    },
+    "idx": {
+        "magic_number": {},
+        "software": "Git",
+        "description": "Pack index file",
+        "category": "Application Specific"
+    },
+    "iif": {
+        "magic_number": {},
+        "software": "Intuit QuickBooks",
+        "description": "Intuit Interchange Format",
+        "category": "Data-Other"
+    },
+    "inf": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Setup Information File",
+        "category": "Application Specific"
+    },
+    "ipynb": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "IPython Notebook",
+        "category": "Script"
+    },
+    "jpeg": {
+        "magic_number": {},
+        "software": "Paint, Photoshop, Windows Photos, Preview",
+        "description": "Joint Photographic Experts Group",
+        "category": "Image"
+    },
+    "js": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "JavaScript Source File",
+        "category": "Script"
+    },
+    "json": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "JavaScript Object Notation",
+        "category": "Data-Other"
+    },
+    "jupyterlab-settings": {
+        "magic_number": {},
+        "software": "Jupyter",
+        "description": "Jupyter Lab Settings File",
+        "category": "Config"
+    },
+    "jupyterlab-workspace": {
+        "magic_number": {},
+        "software": "Jupyter",
+        "description": "Jupyter Lab Workspace File",
+        "category": "Config"
+    },
+    "lng": {
+        "magic_number": {},
+        "software": "Exam Interactive App",
+        "description": "Language Resource File",
+        "category": "Application Specific"
+    },
+    "lnk": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Windows Shortcut",
+        "category": "Application Specific"
+    },
+    "loaded_0": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "log": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Log File",
+        "category": "Other"
+    },
+    "m": {
+        "magic_number": {},
+        "software": "MATLAB",
+        "description": "MATLAB Source File",
+        "category": "Script"
+    },
+    "m3u": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "MP3 link",
+        "category": "URL"
+    },
+    "m4a": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "MPEG-4 Audio",
+        "category": "Audio"
+    },
+    "mat": {
+        "magic_number": {},
+        "software": "MATLAB",
+        "description": "MATLAB Data File",
+        "category": "Data-Other"
+    },
+    "mdb": {
+        "magic_number": {},
+        "software": "Microsoft Access",
+        "description": "Microsoft Access Database File",
+        "category": "Database"
+    },
+    "mkv": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Matroska Video",
+        "category": "Video"
+    },
+    "mo3": {
+        "magic_number": {},
+        "software": "Games",
+        "description": "Compressed module music format",
+        "category": "Application Specific"
+    },
+    "mov": {
+        "magic_number": {},
+        "software": "VLC, QuickTime Player",
+        "description": "QuickTime Movie",
+        "category": "Video"
+    },
+    "mp4": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "MPEG-4 Part 14",
+        "category": "Video"
+    },
+    "mpeg": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Moving Picture Experts Group",
+        "category": "Video"
+    },
+    "mpg": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "MPEG Video File",
+        "category": "Video"
+    },
+    "msg": {
+        "magic_number": {},
+        "software": "Microsoft Outlook",
+        "description": "Microsoft Outlook Email Message",
+        "category": "Email"
+    },
+    "msi": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Microsoft Installer",
+        "category": "Application Specific"
+    },
+    "nfo": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "System Information File",
+        "category": "Application Specific"
+    },
+    "npy": {
+        "magic_number": {},
+        "software": "Python (NumPy)",
+        "description": "NumPy Array File",
+        "category": "Data-Other"
+    },
+    "nsmp7": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "ogg": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Ogg Vorbis Audio File",
+        "category": "Audio"
+    },
+    "orf": {
+        "magic_number": {},
+        "software": "Olympus Viewer, Photoshop, Windows Photos",
+        "description": "Olympus Raw Format",
+        "category": "Image"
+    },
+    "pack": {
+        "magic_number": {},
+        "software": "Git",
+        "description": "Packfile",
+        "category": "Application Specific"
+    },
+    "parquet": {
+        "magic_number": {},
+        "software": "Apache Spark, Pandas, PyArrow, AWS Athena",
+        "description": "Apache Parquet File",
+        "category": "Data-Other"
+    },
+    "pbix": {
+        "magic_number": {},
+        "software": "Microsoft Power BI",
+        "description": "Power BI Desktop File",
+        "category": "Data-PowerBI"
+    },
+    "pckl": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "Python Pickle file",
+        "category": "Data-Other"
+    },
+    "pkl": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "Python Pickle File",
+        "category": "Data-Other"
+    },
+    "png": {
+        "magic_number": {},
+        "software": "Paint, Photoshop, Windows Photos, Preview",
+        "description": "Portable Network Graphics",
+        "category": "Image"
+    },
+    "potx": {
+        "magic_number": {},
+        "software": "Microsoft Power Point",
+        "description": "PowerPoint Macro-Enabled Template",
+        "category": "Data-PowerPoint"
+    },
+    "pptm": {
+        "magic_number": {},
+        "software": "Microsoft Power Point",
+        "description": "PowerPoint Macro-Enabled Presentation",
+        "category": "Data-PowerPoint"
+    },
+    "ps1": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Windows PowerShell",
+        "category": "Script"
+    },
+    "pst": {
+        "magic_number": {},
+        "software": "Microsoft Outlook",
+        "description": "Personal Storage Table (Outlook Data File)",
+        "category": "Email"
+    },
+    "pth": {
+        "magic_number": {},
+        "software": "Python (PyTorch)",
+        "description": "PyTorch Model File",
+        "category": "Data-Other"
+    },
+    "py": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "Python Source File",
+        "category": "Script"
+    },
+    "pyc": {
+        "magic_number": {},
+        "software": "Python Interpreter",
+        "description": "Python Compiled File",
+        "category": "Cache"
+    },
+    "qst": {
+        "magic_number": {},
+        "software": "Quiz Interactive App",
+        "description": "Other",
+        "category": "Application Specific"
+    },
+    "qsz": {
+        "magic_number": {},
+        "software": "Quiz Interactive App",
+        "description": "Other",
+        "category": "Application Specific"
+    },
+    "rar": {
+        "magic_number": {},
+        "software": "WinRAR, 7-Zip",
+        "description": "Roshal Archive",
+        "category": "Archive"
+    },
+    "rdp": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Microsoft Remote Desktop",
+        "category": "Application Specific"
+    },
+    "reg": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Windows Registry File",
+        "category": "Application Specific"
+    },
+    "registry": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Windows Registry",
+        "category": "Application Specific"
+    },
+    "rev": {
+        "magic_number": {},
+        "software": "Git",
+        "description": "Reverse index file",
+        "category": "Application Specific"
+    },
+    "rtf": {
+        "magic_number": {},
+        "software": "Microsoft Word, WordPad, LibreOffice",
+        "description": "Rich Text Format Document",
+        "category": "Documents-Word"
+    },
+    "sample": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "sedb": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Windows Search",
+        "category": "Application Specific"
+    },
+    "sfr": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "sfv": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Simple File Verification",
+        "category": "Other"
+    },
+    "sgn": {
+        "magic_number": {},
+        "software": "Games",
+        "description": "Signature File",
+        "category": "Application Specific"
+    },
+    "sh": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "Unix/Linux Shell Script",
+        "category": "Script"
+    },
+    "sql": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "SQL Script / Query",
+        "category": "Script"
+    },
+    "sqlite": {
+        "magic_number": {},
+        "software": "SQLite",
+        "description": "SQLite Database",
+        "category": "Database"
+    },
+    "swf": {
+        "magic_number": {},
+        "software": "VLC",
+        "description": "Shockwave Flash",
+        "category": "Video"
+    },
+    "sys": {
+        "magic_number": {},
+        "software": "Windows",
+        "description": "Windows System File",
+        "category": "Application Specific"
+    },
+    "thm": {
+        "magic_number": {},
+        "software": "Camera Software, Image Viewers",
+        "description": "Thumbnail file",
+        "category": "Image"
+    },
+    "Trashes": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Deleted files",
+        "category": "Other"
+    },
+    "url": {
+        "magic_number": {},
+        "software": "Other",
+        "description": "Other",
+        "category": "Other"
+    },
+    "wav": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Waveform Audio File Format",
+        "category": "Audio"
+    },
+    "wmv": {
+        "magic_number": {},
+        "software": "VLC, Windows Media Player",
+        "description": "Windows Media Video",
+        "category": "Video"
+    },
+    "X32": {
+        "magic_number": {},
+        "software": "Quiz Interactive App",
+        "description": "Plugin",
+        "category": "Application Specific"
+    },
+    "xlsb": {
+        "magic_number": {},
+        "software": "Microsoft Excel",
+        "description": "Microsoft Excel Binary Workbook",
+        "category": "Data-Excel"
+    },
+    "xlsm": {
+        "magic_number": {},
+        "software": "Microsoft Excel",
+        "description": "Microsoft Excel Open XML Macro-Enabled Workbook",
+        "category": "Data-Excel"
+    },
+    "xml": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "Extensible Markup Language",
+        "category": "Data-Other"
+    },
+    "xz": {
+        "magic_number": {},
+        "software": "Linux",
+        "description": "XZ Compressed File",
+        "category": "Application Specific"
+    },
+    "xzm": {
+        "magic_number": {},
+        "software": "Linux",
+        "description": "Linux System Module",
+        "category": "Application Specific"
+    },
+    "yml": {
+        "magic_number": {},
+        "software": "VS Code",
+        "description": "YAML Files",
+        "category": "Data-Other"
+    }
+}

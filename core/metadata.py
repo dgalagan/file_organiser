@@ -3,7 +3,7 @@ import hashlib
 import os
 from tqdm import tqdm
 from utils.json import init_json, load_json, load_json_str, save_json
-from utils.path import is_file, get_file_stat
+from utils.path import is_file, is_dir, get_file_stat
 
 def get_file_hash(path, hash_algo, parts, read_cap):
     hash_func = getattr(hashlib, hash_algo)
@@ -33,21 +33,39 @@ def get_exif_metadata(batch: list[str], et, et_cfg) -> list[dict] | list:
 def get_batches(files: list[str], batch_size=None):
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
 
-def run_metadata_extraction(files: set[str], storage_cfg, exif_cfg, hash_cfg, reset_storage=False, batch_size=None):
+
+def init_storage(storage_cfg: dict, storage_dir: str, storage_reset: list = None) -> dict:
+    
+    # Init report container
+    report = {"initialized": [], "skipped": [], "error": []}
+    storage_reset = storage_reset or []
+
+    # Assembl storage path
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    storage_path = os.path.join(project_dir, storage_dir)
+    os.makedirs(storage_path, exist_ok=True)
+
+    # Init/reset individual storage files
+    for file_name, config in storage_cfg.items():
+        # Assemble storage file location
+        file_path = os.path.join(storage_path, file_name)
+        # Create storage if not exist
+        if not is_file(file_path) or file_name in storage_reset:
+            try:
+                init_json(file_path, **config)
+                report["initialized"].append(file_name)
+            except Exception as e:
+                report["error"].append((file_name, e))
+        else:
+            report["skipped"].append(file_name)
+
+    return report
+
+def run_metadata_extraction(files: set[str], exif_cfg, hash_cfg, batch_size=None):
     ########     TQDM BAR     ########
     b_format = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
     ########   INIT STORAGE   ########
     storage = {}
-    for path, config in storage_cfg.items():
-        if not is_file(path) or reset_storage:
-            container = config.get("structure")
-            encoding = config.get("encoding")
-            indent = config.get("indent")
-            init_json(path, container=container, encoding=encoding, indent=indent)
-            storage[path] = container
-        else:
-            storage[path] = load_json(path)
-    
     ########   LOAD STORAGE   ########
     exif_metadata = storage.get("db\\exif_metadata.json", [])
     basic_metadata = storage.get("db\\basic_metadata.json", {})
@@ -63,7 +81,7 @@ def run_metadata_extraction(files: set[str], storage_cfg, exif_cfg, hash_cfg, re
     desc = "Acquiring basic metadata + Hash"
     for file in tqdm(files, desc=f"{desc:<35}", bar_format=b_format):
         # Get stored values
-        stored_basic_metadata =  basic_metadata.get(file, {})
+        stored_basic_metadata = basic_metadata.get(file, {})
         stored_mtime = stored_basic_metadata.get("ModifiedAt")
         stored_size = stored_basic_metadata.get("Size")
         stored_hash_cfg = stored_basic_metadata.get("HashConfig", "")

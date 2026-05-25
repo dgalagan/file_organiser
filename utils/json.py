@@ -1,9 +1,15 @@
 import json
 
-def init_json(json_path: str, container: list | dict | None = None, encoding: str | None = None, indent: int = 4) -> None:
-    with open(json_path, "w", encoding=encoding) as f:
-        json.dump(container, f, indent=indent)
-    print(f"JSON file initialized: {json_path}")
+def init_json(json_path: str, container: list | dict,  encoding: str | None = None, indent: int | None = None) -> None:
+    try:
+        with open(json_path, "w", encoding=encoding) as f:
+            json.dump(container, f, indent=indent)
+    except IOError as e:
+        print(f"Disk Error on {json_path}: {e}")
+        raise
+    except TypeError as e:
+        print(f"Data formatting error for {json_path}: {e}")
+        raise
 
 def load_json(json_path: str):
     try:

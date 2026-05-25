@@ -1,6 +1,7 @@
+from config import STORAGE_CFG, EXIF_DB_NAME, BASIC_DB_NAME, HASH_CFG
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.metadata import run_metadata_extraction
+from core.metadata import init_storage, run_metadata_extraction
 from core.exif_data import DateParser, get_worksheets_count, get_year
 from core.df_processor import DfProcessor
 import os
@@ -11,21 +12,6 @@ from utils.text import lower_text
 
 TARGET_DIR = "D:\\MyOrganizedFiles\\"
 SAVE_REPORT = True
-# Storage
-STORAGE_CFG = {
-    "db\\exif_metadata.json": {
-        "structure": [],
-        "encoding": "utf-8",
-        "indent": 4
-    },
-    "db\\basic_metadata.json": {
-        "structure": {},
-        "encoding": "utf-8",
-        "indent": 4
-    }
-}
-# Hash
-HASH_CFG = {"hash_algo": "sha256", "parts": 8, "read_cap": 1024}
 # Exif
 INCLUDE_TAGS = ["-all"]
 EXCLUDE_TAGS = ["--File:Directory"]
@@ -67,7 +53,6 @@ modify_dt_tags = [
     "sourcemodified" # 2 instance
 ]
 
-
 target_path_features = ["DuplicateStatus", "category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "Name"]
 
 def label_duplicate(value):
@@ -91,80 +76,84 @@ def main():
 
     #########    EXTRACT METADATA    #########
     
-    try:
-        failed_files = run_metadata_extraction(files, STORAGE_CFG, EXIF_CFG, HASH_CFG, reset_storage=False, batch_size=100)
-        if failed_files:
-            print(f"{len(failed_files)} failed files identified")
-            # Remove failed files from files
-            files = files - failed_files
-    except Exception as e:
-        print(e)
+    # Initialize storage
+    report = init_storage(STORAGE_CFG, storage_dir="db")
+    print(report)
+
+    # try:
+    #     failed_files = run_metadata_extraction(files, STORAGE_CFG, EXIF_CFG, HASH_CFG, batch_size=100)
+    #     if failed_files:
+    #         print(f"{len(failed_files)} failed files identified")
+    #         # Remove failed files from files
+    #         files = files - failed_files
+    # except Exception as e:
+    #     print(e)
     
     #########           ETL           #########
-    try:
-        exif_processor = DfProcessor()
-        (
-            exif_processor
-            .load_json("db\\exif_metadata.json", orient="records")
-            .transform(os.path.normpath, col_names="SourceFile")
-            .transform(DateParser().parse, col_keywords=created_dt_tags)
-            .transform(lower_text, col_names="File:FileTypeExtension")
-            .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
-            .compute(get_year, store_col="Year", col_names="AggTimestamp")
-            .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
-            # .compute(get_worksheets_count, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
-            .set_index("SourceFile")
-        )
-    except Exception as e:
-        print(f"{e} while processing exif")
+    # try:
+    #     exif_processor = DfProcessor()
+    #     (
+    #         exif_processor
+    #         .load_json("db\\exif_metadata.json", orient="records")
+    #         .transform(os.path.normpath, col_names="SourceFile")
+    #         .transform(DateParser().parse, col_keywords=created_dt_tags)
+    #         .transform(lower_text, col_names="File:FileTypeExtension")
+    #         .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
+    #         .compute(get_year, store_col="Year", col_names="AggTimestamp")
+    #         .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
+    #         # .compute(get_worksheets_count, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
+    #         .set_index("SourceFile")
+    #     )
+    # except Exception as e:
+    #     print(f"{e} while processing exif")
     
-    # read basic
-    try:
-        basic_processor = DfProcessor()
-        (
-            basic_processor
-            .load_json("db\\basic_metadata.json", orient="index")
-            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
-            .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
-        )
-    except Exception as e:
-        print(e)
+    # # read basic
+    # try:
+    #     basic_processor = DfProcessor()
+    #     (
+    #         basic_processor
+    #         .load_json("db\\basic_metadata.json", orient="index")
+    #         .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
+    #         .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
+    #     )
+    # except Exception as e:
+    #     print(e)
 
-    # read category mapping
-    try:
-        category_processor = DfProcessor()
-        (
-            category_processor
-            .load_json("db\\extension_metadata.json", orient="index")
-        )
-    except Exception as e:
-        print(e)
+    # # read category mapping
+    # try:
+    #     category_processor = DfProcessor()
+    #     (
+    #         category_processor
+    #         .load_json("db\\extension_metadata.json", orient="index")
+    #     )
+    # except Exception as e:
+    #     print(e)
 
-    try:
-        master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
-        master_df = master_df.join(
-            [
-                basic_processor.df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
-                exif_processor.df[["File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model", "ID3:Year"]]
-            ],
-            how="left"
-        )
-        master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"])
-        master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
-        master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
-        if SAVE_REPORT:
-            report_path = TARGET_DIR + "\\" + "report.csv"
-            master_df.to_csv(report_path, encoding="utf-8-sig")
-    except Exception as e:
-        print(e)
+    # try:
+    #     master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
+    #     master_df = master_df.join(
+    #         [
+    #             basic_processor.df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
+    #             exif_processor.df[["File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model", "ID3:Year"]]
+    #         ],
+    #         how="left"
+    #     )
+    #     master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"])
+    #     master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
+    #     master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
+    #     if SAVE_REPORT:
+    #         report_path = TARGET_DIR + "\\" + "report.csv"
+    #         master_df.to_csv(report_path, encoding="utf-8-sig")
+    # except Exception as e:
+    #     print(e)
     
     #########     CHECK DISK SPACE    #########
     
-    files_size = master_df["Size"].sum()
-    _, _, free = shutil.disk_usage(TARGET_DIR)
-    if files_size >= free:
-        print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
-        return 1
+    # files_size = master_df["Size"].sum()
+    # _, _, free = shutil.disk_usage(TARGET_DIR)
+    # if files_size >= free:
+    #     print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
+    #     return 1
     
     ######## MOVE FILES ########
     
