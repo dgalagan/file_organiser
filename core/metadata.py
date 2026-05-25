@@ -34,15 +34,13 @@ def get_batches(files: list[str], batch_size=None):
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
 
 
-def init_storage(storage_cfg: dict, storage_dir: str, storage_reset: list = None) -> dict:
+def init_storage(storage_cfg: dict, storage_path: str, storage_reset: list = None) -> dict:
     
     # Init report container
     report = {"initialized": [], "skipped": [], "error": []}
     storage_reset = storage_reset or []
 
-    # Assembl storage path
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    storage_path = os.path.join(project_dir, storage_dir)
+    # Create storage path if not exist
     os.makedirs(storage_path, exist_ok=True)
 
     # Init/reset individual storage files
@@ -53,11 +51,11 @@ def init_storage(storage_cfg: dict, storage_dir: str, storage_reset: list = None
         if not is_file(file_path) or file_name in storage_reset:
             try:
                 init_json(file_path, **config)
-                report["initialized"].append(file_name)
+                report["initialized"].append(file_path)
             except Exception as e:
-                report["error"].append((file_name, e))
+                report["error"].append((file_path, e))
         else:
-            report["skipped"].append(file_name)
+            report["skipped"].append(file_path)
 
     return report
 

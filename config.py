@@ -1,16 +1,19 @@
+import os
+
 # ==============================================================================
 # 1. STORAGE CONFIGURATION
 # ==============================================================================
-EXIF_DB_NAME = "exif_metadata.json"
-BASIC_DB_NAME = "basic_metadata.json"
+EXIF_STORAGE = "exif_metadata.json"
+BASIC_STORAGE = "basic_metadata.json"
+STORAGE_DIR = "db"
 
 STORAGE_CFG = {
-    EXIF_DB_NAME: {
+    EXIF_STORAGE: {
         "container": [],
         "encoding": "utf-8",
         "indent": 4,
     },
-    BASIC_DB_NAME: {
+    BASIC_STORAGE: {
         "container": {},
         "encoding": "utf-8",
         "indent": 4,

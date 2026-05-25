@@ -1,4 +1,4 @@
-from config import STORAGE_CFG, EXIF_DB_NAME, BASIC_DB_NAME, HASH_CFG
+from config import STORAGE_CFG, STORAGE_DIR, EXIF_STORAGE, BASIC_STORAGE, HASH_CFG
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
 from core.metadata import init_storage, run_metadata_extraction
@@ -75,9 +75,10 @@ def main():
         print(e)
 
     #########    EXTRACT METADATA    #########
-    
     # Initialize storage
-    report = init_storage(STORAGE_CFG, storage_dir="db")
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    storage_path = os.path.join(project_dir, STORAGE_DIR)
+    report = init_storage(STORAGE_CFG, storage_path)
     print(report)
 
     # try:
