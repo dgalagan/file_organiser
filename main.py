@@ -1,14 +1,19 @@
-from config import STORAGE_CFG, STORAGE_DIR, EXIF_STORAGE, BASIC_STORAGE, HASH_CFG
+from config import STORAGE_CFG, STORAGE_DIR, EXIF_STORAGE, HASH_STORAGE, HASH_CFG
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.metadata import init_storage, run_metadata_extraction
+from core.metadata import init_storage, calc_file_hash, get_batches, get_exif_metadata
 from core.exif_data import DateParser, get_worksheets_count, get_year
 from core.df_processor import DfProcessor
+from exiftool import ExifTool
 import os
 import pandas as pd
 import sys
 import shutil
+from tqdm import tqdm
 from utils.text import lower_text
+from utils.json import load_json, save_json
+
+# manage lowercase path cases
 
 TARGET_DIR = "D:\\MyOrganizedFiles\\"
 SAVE_REPORT = True
@@ -75,20 +80,100 @@ def main():
         print(e)
 
     #########    EXTRACT METADATA    #########
-    # Initialize storage
+    
+    # Init storage files
     project_dir = os.path.dirname(os.path.abspath(__file__))
     storage_path = os.path.join(project_dir, STORAGE_DIR)
     report = init_storage(STORAGE_CFG, storage_path)
-    print(report)
+    
+    # Init runtime containers
+    runtime_hashes = {}
+    runtime_exif = []
+    runtime_exif_fails = []
+    runtime_size = {}
+    runtime_mdate = {}
 
-    # try:
-    #     failed_files = run_metadata_extraction(files, STORAGE_CFG, EXIF_CFG, HASH_CFG, batch_size=100)
-    #     if failed_files:
-    #         print(f"{len(failed_files)} failed files identified")
-    #         # Remove failed files from files
-    #         files = files - failed_files
-    # except Exception as e:
-    #     print(e)
+    # Load hash data
+    hash_storage_path = os.path.join(storage_path, HASH_STORAGE)
+    hash_storage = load_json(hash_storage_path)
+    hash_cfg_str = "".join(str(value) for value in HASH_CFG.values())
+    calc_hash = []
+    
+    # Load exif data
+    exif_storage_path = os.path.join(storage_path, EXIF_STORAGE)
+    exif_storage = load_json(exif_storage_path)
+    exif_cfg_str = "".join(EXIF_CFG)  
+    extract_exif = []
+
+    # Prepare processing lists
+    tqdm_desc = "Prepare processing lists"
+    for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+        # Get stored hash data
+        stored_hashes = hash_storage.get(file, {})
+        stored_hash = stored_hashes.get(hash_cfg_str, {})
+        stored_h_mtime = stored_hash.get("mtime")
+        stored_h_size = stored_hash.get("size")
+
+         # Get stored exif data
+        stored_exifs = exif_storage.get(file, {})
+        stored_exif = stored_exifs.get(exif_cfg_str, {})
+        stored_e_mtime = stored_exif.get("mtime")
+        stored_e_size = stored_exif.get("size")
+    
+        # Get current mtime and size
+        current_mtime = os.path.getmtime(file)
+        current_size = os.path.getsize(file)
+    
+        # Prepare files list to calculate hash
+        if not stored_hashes or not stored_hash or current_mtime != stored_h_mtime or current_size != stored_h_size:
+            calc_hash.append(file)
+            runtime_size[file] = current_size
+            runtime_mdate[file] = current_mtime
+        else:
+            runtime_hashes[file] = hash_storage[file][hash_cfg_str]["hash"]
+
+        # Prepare files list to extract exif
+        if not stored_exifs or not stored_exif or current_mtime != stored_e_mtime or current_size != stored_e_size:
+            extract_exif.append(file)
+        else:
+            runtime_exif.append(exif_storage[file][exif_cfg_str]["exif"])
+
+    print(f"{len(calc_hash)} to calculate hash, {len(extract_exif)} to extract exif")
+    
+    # Calc hash and update storageWW
+    tqdm_desc = "Extract hash data and update storage"
+    for file_to_hash in tqdm(calc_hash, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+        file_hash = calc_file_hash(file_to_hash, **HASH_CFG)
+        # Update runtime dict
+        runtime_hashes[file_to_hash] = file_hash
+        # Update storage
+        if file_to_hash not in hash_storage:
+            hash_storage[file_to_hash] = {hash_cfg_str: {"hash":file_hash, "mtime":runtime_mdate[file_to_hash], "size":runtime_size[file_to_hash]}}
+        else:
+            hash_storage[file_to_hash][hash_cfg_str] = {"hash":file_hash, "mtime":runtime_mdate[file_to_hash], "size":runtime_size[file_to_hash]}
+
+    # Calc exif and update storage
+    tqdm_desc = "Extract exif data and update storage"
+    batches = get_batches(extract_exif, batch_size=100)
+    with ExifTool(encoding="utf-8") as et:
+        for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+            batch_results = get_exif_metadata(batch, et, EXIF_CFG)
+            runtime_exif.extend(batch_results)
+            # Update exif storage
+            for idx, file_result in enumerate(batch_results):
+                file_path = file_result.get("SourceFile", "").replace('/', '\\')
+                if file_path:
+                    if file_path not in exif_storage:
+                        exif_storage[file_path] = {exif_cfg_str: {"exif": file_result, "mtime":runtime_mdate[file_path], "size":runtime_size[file_path]}}
+                    else:
+                        exif_storage[file_path][exif_cfg_str] = {"exif": file_result, "mtime":runtime_mdate[file_path], "size":runtime_size[file_path]}
+                else:
+                    runtime_exif_fails.append(batch[idx])
+
+    if calc_hash:
+        save_json(hash_storage_path, hash_storage)
+    if extract_exif:
+        save_json(exif_storage_path, exif_storage)
     
     #########           ETL           #########
     # try:
