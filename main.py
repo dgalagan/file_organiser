@@ -1,8 +1,8 @@
-from config import STORAGE_CFG, STORAGE_DIR, EXIF_STORAGE, HASH_STORAGE, HASH_CFG
+from config import STORAGES_LOCATION, STORAGES_CFG, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME, HASH_CFG, EXIF_CFG
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.metadata import init_storage, calc_file_hash, get_batches, get_exif_metadata
-from core.exif_data import DateParser, get_worksheets_count, get_year
+from core.metadata import calc_file_hash, get_batches, get_exif_metadata
+from core.exif_data import DateParser, get_worksheets_count, get_year, label_duplicate
 from core.df_processor import DfProcessor
 from exiftool import ExifTool
 import os
@@ -11,17 +11,13 @@ import sys
 import shutil
 from tqdm import tqdm
 from utils.text import lower_text
-from utils.json import load_json, save_json
+from utils.json import init_json, load_json, save_json, reset_json
+from utils.path import is_file
 
-# manage lowercase path cases
+# manage lowercase path cases in manual input
 
 TARGET_DIR = "D:\\MyOrganizedFiles\\"
 SAVE_REPORT = True
-# Exif
-INCLUDE_TAGS = ["-all"]
-EXCLUDE_TAGS = ["--File:Directory"]
-EXIF_PARAMS = ["-j", "-G"]
-EXIF_CFG = [*EXIF_PARAMS, *INCLUDE_TAGS, *EXCLUDE_TAGS]
 
 # datetime tags
 created_dt_tags = [
@@ -58,10 +54,7 @@ modify_dt_tags = [
     "sourcemodified" # 2 instance
 ]
 
-target_path_features = ["DuplicateStatus", "category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "Name"]
-
-def label_duplicate(value):
-    return "duplicate" if value else "original"
+target_path_features = ["DuplicateStatus", "category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "File:FileName"]
 
 def main():
     
@@ -80,34 +73,51 @@ def main():
         print(e)
 
     #########    EXTRACT METADATA    #########
+    loaded_storages = {}
+    for storage_name, storage_path in STORAGES_LOCATION.items():
+        # Initialize storage file
+        if not is_file(storage_path):
+            try:
+                storage_cfg = STORAGES_CFG[storage_name]
+                init_json(storage_path, **storage_cfg)
+            except Exception as e:
+                print(e)
+        # Reset the storage file if requested
+        if STORAGES_RESET[storage_name]:
+            try:
+                reset_json(storage_path)
+            except Exception as e:
+                print(e)
+        # Load storage into runtime
+        try:
+            loaded_data = load_json(storage_path)
+            loaded_storages[storage_name] = loaded_data
+        except Exception as e:
+            print(e)
+
+    # Load storages
+    exif_storage = loaded_storages[EXIF_STORAGE_NAME]
+    hash_storage = loaded_storages[HASH_STORAGE_NAME]
     
-    # Init storage files
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    storage_path = os.path.join(project_dir, STORAGE_DIR)
-    report = init_storage(STORAGE_CFG, storage_path)
-    
-    # Init runtime containers
+    # Serialize configuration settings into strings for hashing
+    hash_cfg_str = "".join(str(value) for value in HASH_CFG.values())
+    exif_cfg_str = "".join(EXIF_CFG)
+
+    # Initialize runtime containers
     runtime_hashes = {}
     runtime_exif = []
     runtime_exif_fails = []
     runtime_size = {}
     runtime_mdate = {}
 
-    # Load hash data
-    hash_storage_path = os.path.join(storage_path, HASH_STORAGE)
-    hash_storage = load_json(hash_storage_path)
-    hash_cfg_str = "".join(str(value) for value in HASH_CFG.values())
-    calc_hash = []
-    
-    # Load exif data
-    exif_storage_path = os.path.join(storage_path, EXIF_STORAGE)
-    exif_storage = load_json(exif_storage_path)
-    exif_cfg_str = "".join(EXIF_CFG)  
-    extract_exif = []
+    # Initialize lists for file processing
+    files_to_hash = []
+    files_to_exif = []
 
     # Prepare processing lists
     tqdm_desc = "Prepare processing lists"
     for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+        
         # Get stored hash data
         stored_hashes = hash_storage.get(file, {})
         stored_hash = stored_hashes.get(hash_cfg_str, {})
@@ -124,25 +134,25 @@ def main():
         current_mtime = os.path.getmtime(file)
         current_size = os.path.getsize(file)
     
-        # Prepare files list to calculate hash
+        # Fill files list to calculate hash
         if not stored_hashes or not stored_hash or current_mtime != stored_h_mtime or current_size != stored_h_size:
-            calc_hash.append(file)
+            files_to_hash.append(file)
             runtime_size[file] = current_size
             runtime_mdate[file] = current_mtime
         else:
             runtime_hashes[file] = hash_storage[file][hash_cfg_str]["hash"]
 
-        # Prepare files list to extract exif
+        # Fill files list to extract exif
         if not stored_exifs or not stored_exif or current_mtime != stored_e_mtime or current_size != stored_e_size:
-            extract_exif.append(file)
+            files_to_exif.append(file)
         else:
             runtime_exif.append(exif_storage[file][exif_cfg_str]["exif"])
 
-    print(f"{len(calc_hash)} to calculate hash, {len(extract_exif)} to extract exif")
+    print(f"{len(files_to_hash)} to calculate hash, {len(files_to_exif)} to extract exif")
     
     # Calc hash and update storageWW
     tqdm_desc = "Extract hash data and update storage"
-    for file_to_hash in tqdm(calc_hash, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+    for file_to_hash in tqdm(files_to_hash, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
         file_hash = calc_file_hash(file_to_hash, **HASH_CFG)
         # Update runtime dict
         runtime_hashes[file_to_hash] = file_hash
@@ -154,7 +164,7 @@ def main():
 
     # Calc exif and update storage
     tqdm_desc = "Extract exif data and update storage"
-    batches = get_batches(extract_exif, batch_size=100)
+    batches = get_batches(files_to_exif, batch_size=100)
     with ExifTool(encoding="utf-8") as et:
         for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
             batch_results = get_exif_metadata(batch, et, EXIF_CFG)
@@ -170,76 +180,81 @@ def main():
                 else:
                     runtime_exif_fails.append(batch[idx])
 
-    if calc_hash:
-        save_json(hash_storage_path, hash_storage)
-    if extract_exif:
-        save_json(exif_storage_path, exif_storage)
+    for storage_name, updated_storage in loaded_storages.items():
+        save_json(STORAGES_LOCATION[storage_name], updated_storage)
     
-    #########           ETL           #########
-    # try:
-    #     exif_processor = DfProcessor()
-    #     (
-    #         exif_processor
-    #         .load_json("db\\exif_metadata.json", orient="records")
-    #         .transform(os.path.normpath, col_names="SourceFile")
-    #         .transform(DateParser().parse, col_keywords=created_dt_tags)
-    #         .transform(lower_text, col_names="File:FileTypeExtension")
-    #         .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
-    #         .compute(get_year, store_col="Year", col_names="AggTimestamp")
-    #         .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
-    #         # .compute(get_worksheets_count, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
-    #         .set_index("SourceFile")
-    #     )
-    # except Exception as e:
-    #     print(f"{e} while processing exif")
+    ########           ETL           #########
+    print(f"LOAD & TRANSFORM EXIF DATA")
+    try:
+        exif_processor = DfProcessor()
+        (
+            exif_processor
+            .load_dict(runtime_exif, orient="columns")
+            .transform(os.path.normpath, col_names="SourceFile")
+            .transform(DateParser().parse, col_keywords=created_dt_tags)
+            .transform(lower_text, col_names="File:FileTypeExtension")
+            .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
+            .compute(get_year, store_col="Year", col_names="AggTimestamp")
+            .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
+            # .compute(get_worksheets_count, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
+            .set_index("SourceFile")
+        )
+    except Exception as e:
+        print(f"{e} while processing exif")
     
-    # # read basic
-    # try:
-    #     basic_processor = DfProcessor()
-    #     (
-    #         basic_processor
-    #         .load_json("db\\basic_metadata.json", orient="index")
-    #         .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
-    #         .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
-    #     )
-    # except Exception as e:
-    #     print(e)
+    # read basic
+    print(f"LOAD & TRANSFORM HASH DATA")
+    try:
+        hash_processor = DfProcessor()
+        (
+            hash_processor
+            .load_dict(runtime_hashes, orient="index", cols=["Hash"])
+            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
+            .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
+        )
+    except Exception as e:
+        print(f"{e} while processing hash")
 
-    # # read category mapping
-    # try:
-    #     category_processor = DfProcessor()
-    #     (
-    #         category_processor
-    #         .load_json("db\\extension_metadata.json", orient="index")
-    #     )
-    # except Exception as e:
-    #     print(e)
+    # read category mapping
+    print(f"LOAD & TRANSFORM REF DATA")
+    try:
+        category_processor = DfProcessor()
+        (
+            category_processor
+            .load_json("ref\\extension_metadata.json", orient="index")
+        )
+    except Exception as e:
+        print(f"{e} while processing ref data")
 
-    # try:
-    #     master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
-    #     master_df = master_df.join(
-    #         [
-    #             basic_processor.df[["Hash", "DuplicateStatus", "Name", "Size", "Ext"]],
-    #             exif_processor.df[["File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model", "ID3:Year"]]
-    #         ],
-    #         how="left"
-    #     )
-    #     master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"].fillna(master_df["Ext"])
-    #     master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
-    #     master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
-    #     if SAVE_REPORT:
-    #         report_path = TARGET_DIR + "\\" + "report.csv"
-    #         master_df.to_csv(report_path, encoding="utf-8-sig")
-    # except Exception as e:
-    #     print(e)
+    print(f"PREPARE MASTER DATA")
+    try:
+        master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
+        master_df = master_df.join(
+            [
+                hash_processor.df[["Hash", "DuplicateStatus"]],
+                exif_processor.df[["File:FileName", "File:FileSize", "File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model", "ID3:Year"]]
+            ],
+            how="left"
+        )
+        master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"]
+        master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
+        master_df["category"] = master_df["category"].fillna("Other")
+        master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
+        
+        if SAVE_REPORT:
+            report_path = TARGET_DIR + "\\" + "report.csv"
+            master_df.to_csv(report_path, encoding="utf-8-sig")
+        
+    except Exception as e:
+        print(f"{e} while processing master")
     
     #########     CHECK DISK SPACE    #########
     
-    # files_size = master_df["Size"].sum()
-    # _, _, free = shutil.disk_usage(TARGET_DIR)
-    # if files_size >= free:
-    #     print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
-    #     return 1
+    files_size = master_df["File:FileSize"].sum()
+    _, _, free = shutil.disk_usage(TARGET_DIR)
+    if files_size >= free:
+        print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
+        return 1
     
     ######## MOVE FILES ########
     

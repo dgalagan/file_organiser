@@ -69,6 +69,9 @@ def get_worksheets_count(heading_pairs: list) -> int:
 
     return None
 
+def label_duplicate(value):
+    return "duplicate" if value else "original"
+
 def calculate_coverage(json_path: str):
     exif_meta = json.load(json_path)
     coverage_report = {}

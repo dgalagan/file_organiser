@@ -33,6 +33,17 @@ class DfProcessor:
 
         return self
     
+    def load_dict(self, items: dict | list[dict], orient: str | None = None, cols = None):
+        if not items:
+            raise EmptyDataError("No data to process")
+        # if not isinstance(items, dict):
+        #     raise TypeError("paths should be a list")
+        
+        # Load paths
+        self.df = self.df.from_dict(items, orient=orient, columns=cols)
+
+        return self
+    
     def load_csv(self, path:str):
         if not is_file(path):
             raise FileNotFoundError(f"Path is not a file: {path}")
