@@ -1,4 +1,6 @@
-from config import STORAGES_LOCATION, STORAGES_CFG, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME, HASH_CFG, EXIF_CFG
+from configs.storage_cfg import STORAGES_LOCATION, STORAGES_CFG, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
+from configs.hash_cfg import HASH_CFG
+from configs.exif_cfg import EXIF_CFG, BATCH_SIZE
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
 from core.metadata import calc_file_hash, get_batches, get_exif_metadata
@@ -72,7 +74,7 @@ def main():
     except Exception as e:
         print(e)
 
-    #########    EXTRACT METADATA    #########
+    #########        EXTRACT         #########
     loaded_storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
         # Initialize storage file
@@ -131,26 +133,24 @@ def main():
         stored_e_size = stored_exif.get("size")
     
         # Get current mtime and size
-        current_mtime = os.path.getmtime(file)
-        current_size = os.path.getsize(file)
+        runtime_size[file] = os.path.getmtime(file)
+        runtime_mdate[file] = os.path.getsize(file)
     
         # Fill files list to calculate hash
-        if not stored_hashes or not stored_hash or current_mtime != stored_h_mtime or current_size != stored_h_size:
+        if not stored_hashes or not stored_hash or runtime_size[file] != stored_h_mtime or runtime_mdate[file] != stored_h_size:
             files_to_hash.append(file)
-            runtime_size[file] = current_size
-            runtime_mdate[file] = current_mtime
         else:
             runtime_hashes[file] = hash_storage[file][hash_cfg_str]["hash"]
 
         # Fill files list to extract exif
-        if not stored_exifs or not stored_exif or current_mtime != stored_e_mtime or current_size != stored_e_size:
+        if not stored_exifs or not stored_exif or runtime_size[file] != stored_e_mtime or runtime_mdate[file] != stored_e_size:
             files_to_exif.append(file)
         else:
             runtime_exif.append(exif_storage[file][exif_cfg_str]["exif"])
 
     print(f"{len(files_to_hash)} to calculate hash, {len(files_to_exif)} to extract exif")
     
-    # Calc hash and update storageWW
+    # Calc hash and update storage
     tqdm_desc = "Extract hash data and update storage"
     for file_to_hash in tqdm(files_to_hash, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
         file_hash = calc_file_hash(file_to_hash, **HASH_CFG)
@@ -164,14 +164,14 @@ def main():
 
     # Calc exif and update storage
     tqdm_desc = "Extract exif data and update storage"
-    batches = get_batches(files_to_exif, batch_size=100)
+    batches = get_batches(files_to_exif, batch_size=BATCH_SIZE)
     with ExifTool(encoding="utf-8") as et:
         for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
             batch_results = get_exif_metadata(batch, et, EXIF_CFG)
             runtime_exif.extend(batch_results)
             # Update exif storage
             for idx, file_result in enumerate(batch_results):
-                file_path = file_result.get("SourceFile", "").replace('/', '\\')
+                file_path = file_result.get("SourceFile", "").replace('/', os.sep)
                 if file_path:
                     if file_path not in exif_storage:
                         exif_storage[file_path] = {exif_cfg_str: {"exif": file_result, "mtime":runtime_mdate[file_path], "size":runtime_size[file_path]}}
@@ -180,10 +180,14 @@ def main():
                 else:
                     runtime_exif_fails.append(batch[idx])
 
+    # Save updated data
     for storage_name, updated_storage in loaded_storages.items():
-        save_json(STORAGES_LOCATION[storage_name], updated_storage)
-    
-    ########           ETL           #########
+        try:
+            save_json(STORAGES_LOCATION[storage_name], updated_storage)
+        except Exception as e:  
+            print(e)
+
+    #########       TRANSFORM        #########
     print(f"LOAD & TRANSFORM EXIF DATA")
     try:
         exif_processor = DfProcessor()
@@ -239,10 +243,10 @@ def main():
         master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"]
         master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
         master_df["category"] = master_df["category"].fillna("Other")
-        master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + "\\".join([str(value) for value in row if pd.notna(value)]), axis=1)
+        master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + os.sep.join([str(value) for value in row if pd.notna(value)]), axis=1)
         
         if SAVE_REPORT:
-            report_path = TARGET_DIR + "\\" + "report.csv"
+            report_path = TARGET_DIR + os.sep + "report.csv"
             master_df.to_csv(report_path, encoding="utf-8-sig")
         
     except Exception as e:
@@ -256,7 +260,7 @@ def main():
         print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
         return 1
     
-    ######## MOVE FILES ########
+    ########        MOVE FILES        #########
     
     # desc = "Copying files into new structure"
     # b_format = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
