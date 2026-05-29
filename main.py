@@ -1,12 +1,8 @@
-from configs.storage_cfg import STORAGES_LOCATION, STORAGES_CFG, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
-from configs.hash_cfg import HASH_CFG
-from configs.exif_cfg import EXIF_CFG, BATCH_SIZE
+from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT_CFG, STORAGES_PIPELINE_CFG, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.metadata import calc_file_hash, get_batches, get_exif_metadata
 from core.exif_data import DateParser, get_worksheets_count, get_year, label_duplicate
 from core.df_processor import DfProcessor
-from exiftool import ExifTool
 import os
 import pandas as pd
 import sys
@@ -75,12 +71,12 @@ def main():
         print(e)
 
     #########        EXTRACT         #########
-    loaded_storages = {}
+    storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
         # Initialize storage file
         if not is_file(storage_path):
             try:
-                storage_cfg = STORAGES_CFG[storage_name]
+                storage_cfg = STORAGES_INIT_CFG[storage_name]
                 init_json(storage_path, **storage_cfg)
             except Exception as e:
                 print(e)
@@ -93,95 +89,57 @@ def main():
         # Load storage into runtime
         try:
             loaded_data = load_json(storage_path)
-            loaded_storages[storage_name] = loaded_data
+            storages[storage_name] = loaded_data
         except Exception as e:
             print(e)
-
-    # Load storages
-    exif_storage = loaded_storages[EXIF_STORAGE_NAME]
-    hash_storage = loaded_storages[HASH_STORAGE_NAME]
     
-    # Serialize configuration settings into strings for hashing
-    hash_cfg_str = "".join(str(value) for value in HASH_CFG.values())
-    exif_cfg_str = "".join(EXIF_CFG)
-
-    # Initialize runtime containers
-    runtime_hashes = {}
-    runtime_exif = []
-    runtime_exif_fails = []
+    # Initialize runtime data containers
+    runtime_data = {storage_name: {} for storage_name in storages}
     runtime_size = {}
-    runtime_mdate = {}
+    runtime_mtime = {}
 
-    # Initialize lists for file processing
-    files_to_hash = []
-    files_to_exif = []
+    # Initialize processing queue container
+    processing_queue = {storage_name: [] for storage_name in storages}
 
     # Prepare processing lists
-    tqdm_desc = "Prepare processing lists"
+    tqdm_desc = "Prepare processing queue:"
     for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
-        
-        # Get stored hash data
-        stored_hashes = hash_storage.get(file, {})
-        stored_hash = stored_hashes.get(hash_cfg_str, {})
-        stored_h_mtime = stored_hash.get("mtime")
-        stored_h_size = stored_hash.get("size")
-
-         # Get stored exif data
-        stored_exifs = exif_storage.get(file, {})
-        stored_exif = stored_exifs.get(exif_cfg_str, {})
-        stored_e_mtime = stored_exif.get("mtime")
-        stored_e_size = stored_exif.get("size")
-    
         # Get current mtime and size
-        runtime_size[file] = os.path.getmtime(file)
-        runtime_mdate[file] = os.path.getsize(file)
+        runtime_size[file] = os.path.getsize(file)
+        runtime_mtime[file] = os.path.getmtime(file)  
+        for storage_name, storage_data in storages.items():
+            # Get stored hash data
+            file_history = storage_data.get(file, {})
+            cached_snapshot = file_history.get(STORAGES_PIPELINE_CFG[storage_name]["cfg_str"], {})
+            cached_data = cached_snapshot.get("data")
+            cached_mtime = cached_snapshot.get("mtime")
+            cached_size = cached_snapshot.get("size")
+            # Add file to processing queue or reuse cached data for this runtime
+            if not file_history or not cached_snapshot or runtime_mtime[file] != cached_mtime or runtime_size[file] != cached_size:
+                processing_queue[storage_name].append(file)
+            else:
+                runtime_data[storage_name][file] = cached_data
+        
+    # Log the total number of files that require processing
+    print("\n".join(f"{len(processing_queue[storage_name])} file(s) queued for [{storage_name}] processing" for storage_name in processing_queue))
     
-        # Fill files list to calculate hash
-        if not stored_hashes or not stored_hash or runtime_size[file] != stored_h_mtime or runtime_mdate[file] != stored_h_size:
-            files_to_hash.append(file)
-        else:
-            runtime_hashes[file] = hash_storage[file][hash_cfg_str]["hash"]
-
-        # Fill files list to extract exif
-        if not stored_exifs or not stored_exif or runtime_size[file] != stored_e_mtime or runtime_mdate[file] != stored_e_size:
-            files_to_exif.append(file)
-        else:
-            runtime_exif.append(exif_storage[file][exif_cfg_str]["exif"])
-
-    print(f"{len(files_to_hash)} to calculate hash, {len(files_to_exif)} to extract exif")
-    
-    # Calc hash and update storage
-    tqdm_desc = "Extract hash data and update storage"
-    for file_to_hash in tqdm(files_to_hash, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
-        file_hash = calc_file_hash(file_to_hash, **HASH_CFG)
-        # Update runtime dict
-        runtime_hashes[file_to_hash] = file_hash
-        # Update storage
-        if file_to_hash not in hash_storage:
-            hash_storage[file_to_hash] = {hash_cfg_str: {"hash":file_hash, "mtime":runtime_mdate[file_to_hash], "size":runtime_size[file_to_hash]}}
-        else:
-            hash_storage[file_to_hash][hash_cfg_str] = {"hash":file_hash, "mtime":runtime_mdate[file_to_hash], "size":runtime_size[file_to_hash]}
-
-    # Calc exif and update storage
-    tqdm_desc = "Extract exif data and update storage"
-    batches = get_batches(files_to_exif, batch_size=BATCH_SIZE)
-    with ExifTool(encoding="utf-8") as et:
-        for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
-            batch_results = get_exif_metadata(batch, et, EXIF_CFG)
-            runtime_exif.extend(batch_results)
-            # Update exif storage
-            for idx, file_result in enumerate(batch_results):
-                file_path = file_result.get("SourceFile", "").replace('/', os.sep)
-                if file_path:
-                    if file_path not in exif_storage:
-                        exif_storage[file_path] = {exif_cfg_str: {"exif": file_result, "mtime":runtime_mdate[file_path], "size":runtime_size[file_path]}}
-                    else:
-                        exif_storage[file_path][exif_cfg_str] = {"exif": file_result, "mtime":runtime_mdate[file_path], "size":runtime_size[file_path]}
-                else:
-                    runtime_exif_fails.append(batch[idx])
+    # Handle processing queue
+    for storage_name, files_to_process in processing_queue.items():
+        storage = storages[storage_name]
+        cfg_str = STORAGES_PIPELINE_CFG[storage_name]["cfg_str"]
+        func = STORAGES_PIPELINE_CFG[storage_name]["func"]
+        cfg = STORAGES_PIPELINE_CFG[storage_name]["cfg"]
+        for processed_file, result in func(files_to_process, cfg):
+            # Update runtime container
+            runtime_data[storage_name][processed_file] = result
+            # Update storage
+            if processed_file not in storage:
+                storage[processed_file] = {cfg_str: {"data":result, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
+            else:
+                storage[processed_file][cfg_str] = {"data":result, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
 
     # Save updated data
-    for storage_name, updated_storage in loaded_storages.items():
+    for storage_name, updated_storage in storages.items():
         try:
             save_json(STORAGES_LOCATION[storage_name], updated_storage)
         except Exception as e:  
@@ -193,7 +151,7 @@ def main():
         exif_processor = DfProcessor()
         (
             exif_processor
-            .load_dict(runtime_exif, orient="columns")
+            .load_dict(runtime_data[EXIF_STORAGE_NAME], orient="index")
             .transform(os.path.normpath, col_names="SourceFile")
             .transform(DateParser().parse, col_keywords=created_dt_tags)
             .transform(lower_text, col_names="File:FileTypeExtension")
@@ -212,7 +170,7 @@ def main():
         hash_processor = DfProcessor()
         (
             hash_processor
-            .load_dict(runtime_hashes, orient="index", cols=["Hash"])
+            .load_dict(runtime_data[HASH_STORAGE_NAME], orient="index", cols=["Hash"])
             .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
             .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
         )

@@ -1,5 +1,9 @@
+exif_params = ["-j", "-G"]
 include_tags = ["-all"]
 exclude_tags = ["--File:Directory"]
-exif_params = ["-j", "-G"]
-EXIF_CFG = [*exif_params, *include_tags, *exclude_tags]
-BATCH_SIZE = 100
+EXIF_ARGS = [*exif_params, *include_tags, *exclude_tags]
+BATCH_SIZE = 0
+EXIF_CFG = {
+    "args": EXIF_ARGS,
+    "batch_size": BATCH_SIZE
+}

@@ -1,17 +1,53 @@
 from exiftool import ExifTool
 import hashlib
 import os
-from utils.json import load_json_str
+import json
+from tqdm import tqdm
 
-def get_exif_metadata(batch: list[str], et, et_cfg) -> list[dict] | list:
-    try:
-        raw_output = et.execute(*et_cfg, *batch)
-        return load_json_str(raw_output)
-    except Exception as e:
-        print(e)
-        return []
+def get_exif_data(files: list[str], config: dict):
+    
+    if not isinstance(config, dict):
+        raise TypeError(f"Unsupported config type - {type(config)}")
 
-def get_batches(files: list[str], batch_size=None):
+    args = config.get("args", [])
+    batch_size = config.get("batch_size", 0)
+
+    batches = None
+    if batch_size > 0:
+        batches = get_batches(files, batch_size)
+    
+    tqdm_desc = "Extract exif data:"
+    with ExifTool(encoding="utf-8") as et:
+        if batches is not None:
+            for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+                raw_output = et.execute(*args, *batch)
+                batch_results = json.loads(raw_output)
+                for batch_result in batch_results:
+                    file = batch_result.get("SourceFile", "").replace('/', os.sep)
+                    yield file, batch_result
+        else:
+            for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+                raw_output = et.execute(*args, file)
+                file_result = json.loads(raw_output)
+                if isinstance(file_result, list) and len(file_result) == 1:
+                    yield file, file_result[0]
+                elif isinstance(file_result, dict):
+                    yield file, file_result
+                else:
+                    print("Unsupported output from exif")
+                    yield file, file_result
+
+def get_hash_data(files: list[str], config: dict):
+
+    if not isinstance(config, dict):
+        raise TypeError(f"Unsupported config type - {type(config)}")
+
+    tqdm_desc = "Extract hash data:"
+    for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+        file_hash = calc_file_hash(file, **config)
+        yield file, file_hash
+
+def get_batches(files: list[str], batch_size: int):
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
 
 def calc_file_hash(path, hash_algo, parts, read_cap):
