@@ -1,4 +1,5 @@
 from configs.extraction_cfg import EXTRACTION_CFG
+from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
@@ -71,7 +72,7 @@ def main():
     except Exception as e:
         print(e)
 
-    #########      INIT STORAGE      #########
+    #########      LOAD STORAGE      #########
     
     storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
@@ -88,10 +89,10 @@ def main():
                 reset_json(storage_path)
             except Exception as e:
                 print(e)
-        # Load storage into runtime
+        # Load storage data
         try:
-            loaded_data = load_json(storage_path)
-            storages[storage_name] = loaded_data
+            storage_data = load_json(storage_path)
+            storages[storage_name] = storage_data
         except Exception as e:
             print(e)
 
@@ -147,14 +148,28 @@ def main():
                     storage[processed_file][cfg_str] = {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
 
     # Save updated data
-    for storage_name, updated_storage in storages.items():
+    for storage_name, updated_data in storages.items():
         try:
-            save_json(STORAGES_LOCATION[storage_name], updated_storage)
+            save_json(STORAGES_LOCATION[storage_name], updated_data)
         except Exception as e:  
             print(e)
 
-    #########       TRANSFORM        #########
-    print(f"LOAD & TRANSFORM EXIF DATA")
+    # Load ref data into runtime
+    for ref_name, ref_path in REFS_LOCATION.items():
+        try:
+            ref_data = load_json(ref_path)
+            runtime_data[ref_name] = ref_data
+        except Exception as e:
+            print(e)
+
+    #########     TRANSFORM DATA     #########
+    # Load runtime data into df
+    runtime_dfs = {}
+    for runtime_key, runtime_dict in runtime_data.items():
+        df = pd.DataFrame.from_dict(runtime_dict, orient="index")
+        runtime_dfs[runtime_key] = df
+
+    print(f"TRANSFORM EXIF")
     try:
         exif_processor = DfProcessor()
         (
@@ -166,14 +181,13 @@ def main():
             .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
             .compute(get_year, store_col="Year", col_names="AggTimestamp")
             .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
-            # .compute(get_worksheets_count, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
+            # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
             .set_index("SourceFile")
         )
     except Exception as e:
         print(f"{e} while processing exif")
     
-    # read basic
-    print(f"LOAD & TRANSFORM HASH DATA")
+    print(f"TRANSFORM HASH")
     try:
         hash_processor = DfProcessor()
         (
@@ -185,8 +199,7 @@ def main():
     except Exception as e:
         print(f"{e} while processing hash")
 
-    # read category mapping
-    print(f"LOAD & TRANSFORM REF DATA")
+    print(f"TRANSFORM REF")
     try:
         category_processor = DfProcessor()
         (

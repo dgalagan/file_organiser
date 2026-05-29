@@ -1,7 +1,7 @@
 from exiftool import ExifTool
 import hashlib
-import os
 import json
+import os
 from tqdm import tqdm
 
 def extract_exif_data(files: list[str], config: dict):
@@ -22,9 +22,9 @@ def extract_exif_data(files: list[str], config: dict):
             for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
                 raw_output = et.execute(*args, *batch)
                 batch_results = json.loads(raw_output)
-                for batch_result in batch_results:
-                    file = batch_result.get("SourceFile", "").replace('/', os.sep)
-                    yield file, batch_result
+                for file_result in batch_results:
+                    file = file_result.get("SourceFile", "").replace('/', os.sep)
+                    yield file, file_result
         else:
             for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
                 raw_output = et.execute(*args, file)

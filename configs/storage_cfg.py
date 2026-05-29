@@ -3,10 +3,10 @@ import os
 # Define storage directory path
 project_dir =  os.getcwd()
 storage_dir = "db"
-storage_path = os.path.join(project_dir, storage_dir)
+storage_dir_path = os.path.join(project_dir, storage_dir)
 
 # Ensure the storage directory exists
-os.makedirs(storage_path, exist_ok=True)
+os.makedirs(storage_dir_path, exist_ok=True)
 
 # Define storage filenames
 EXIF_STORAGE_NAME = "exif_db.json"
@@ -14,7 +14,7 @@ HASH_STORAGE_NAME = "hash_db.json"
 storage_names = [EXIF_STORAGE_NAME, HASH_STORAGE_NAME]
 
 STORAGES_LOCATION = {
-    storage_name: os.path.join(storage_path, storage_name)
+    storage_name: os.path.join(storage_dir_path, storage_name)
     for storage_name in storage_names
 }
 
