@@ -1,7 +1,8 @@
-from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT_CFG, STORAGES_PIPELINE_CFG, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
+from configs.extraction_cfg import EXTRACTION_CFG
+from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.exif_data import DateParser, get_worksheets_count, get_year, label_duplicate
+from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate
 from core.df_processor import DfProcessor
 import os
 import pandas as pd
@@ -70,14 +71,15 @@ def main():
     except Exception as e:
         print(e)
 
-    #########        EXTRACT         #########
+    #########      INIT STORAGE      #########
+    
     storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
         # Initialize storage file
         if not is_file(storage_path):
             try:
-                storage_cfg = STORAGES_INIT_CFG[storage_name]
-                init_json(storage_path, **storage_cfg)
+                init_cfg = STORAGES_INIT[storage_name]
+                init_json(storage_path, **init_cfg)
             except Exception as e:
                 print(e)
         # Reset the storage file if requested
@@ -92,6 +94,8 @@ def main():
             storages[storage_name] = loaded_data
         except Exception as e:
             print(e)
+
+    #########      EXTRACT DATA      #########
     
     # Initialize runtime data containers
     runtime_data = {storage_name: {} for storage_name in storages}
@@ -101,16 +105,16 @@ def main():
     # Initialize processing queue container
     processing_queue = {storage_name: [] for storage_name in storages}
 
-    # Prepare processing lists
+    # Prepare processing queues
     tqdm_desc = "Prepare processing queue:"
     for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
         # Get current mtime and size
         runtime_size[file] = os.path.getsize(file)
         runtime_mtime[file] = os.path.getmtime(file)  
         for storage_name, storage_data in storages.items():
-            # Get stored hash data
+            # Get cached data
             file_history = storage_data.get(file, {})
-            cached_snapshot = file_history.get(STORAGES_PIPELINE_CFG[storage_name]["cfg_str"], {})
+            cached_snapshot = file_history.get(EXTRACTION_CFG[storage_name]["cfg_str"], {})
             cached_data = cached_snapshot.get("data")
             cached_mtime = cached_snapshot.get("mtime")
             cached_size = cached_snapshot.get("size")
@@ -125,18 +129,22 @@ def main():
     
     # Handle processing queue
     for storage_name, files_to_process in processing_queue.items():
-        storage = storages[storage_name]
-        cfg_str = STORAGES_PIPELINE_CFG[storage_name]["cfg_str"]
-        func = STORAGES_PIPELINE_CFG[storage_name]["func"]
-        cfg = STORAGES_PIPELINE_CFG[storage_name]["cfg"]
-        for processed_file, result in func(files_to_process, cfg):
-            # Update runtime container
-            runtime_data[storage_name][processed_file] = result
-            # Update storage
-            if processed_file not in storage:
-                storage[processed_file] = {cfg_str: {"data":result, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
-            else:
-                storage[processed_file][cfg_str] = {"data":result, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
+        # Load storage
+        storage = storages.get(storage_name, {})
+        # Load storage config
+        extraction_cfg = EXTRACTION_CFG.get(storage_name, {})
+        cfg_str = extraction_cfg.get("cfg_str", '')
+        cfg = extraction_cfg.get("cfg", {})
+        func = extraction_cfg.get("func")
+        if cfg_str and cfg and func is not None:
+            for processed_file, data in func(files_to_process, cfg):
+                # Update runtime container
+                runtime_data[storage_name][processed_file] = data
+                # Update storage
+                if processed_file not in storage:
+                    storage[processed_file] = {cfg_str: {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
+                else:
+                    storage[processed_file][cfg_str] = {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
 
     # Save updated data
     for storage_name, updated_storage in storages.items():
