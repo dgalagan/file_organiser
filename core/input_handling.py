@@ -7,7 +7,7 @@ from pandas.errors import ParserError
 import pandas as pd
 import sys
 from utils.path import is_not_dir, is_parent, get_normalized_path, get_dir_depth, get_branch_depth, clean_dir
-from utils.text import lower_text, strip_text
+from utils.text import lowercase_text, strip_text
 
 # To improve:
 # instead of os.walk(), create recursion based on os.scandir()
@@ -33,7 +33,7 @@ def main_loop(cli_grouped_objects: dict, cli_objects: dict): # 1st level
         # Request user input
         try:
             input_option = input(render_cli_object(cli_objects["prompt"]))
-            input_option = lower_text(strip_text(input_option))
+            input_option = lowercase_text(strip_text(input_option))
         except KeyboardInterrupt:
             print()
             print(Icon.DOWNARROW.repeat(3))
@@ -167,7 +167,7 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_d
         # Request user input
         try:
             depth_input = input(render_cli_object(cli_objects["prompt"]))
-            depth_input = lower_text(strip_text(depth_input))
+            depth_input = lowercase_text(strip_text(depth_input))
         except KeyboardInterrupt:
             print()
             return None, MenuActions.INTERUPT

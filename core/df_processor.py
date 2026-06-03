@@ -1,6 +1,6 @@
 import pandas as pd
 from utils.path import is_file, get_file_extension
-from utils.text import lower_text
+from utils.text import lowercase_text
 
 # To improve:
 # incorporate schema validation
@@ -10,8 +10,8 @@ class EmptyDataError(Exception):
     pass
 
 class DfProcessor:
-    def __init__(self):
-        self.df = pd.DataFrame()
+    def __init__(self, df: pd.DataFrame = pd.DataFrame()):
+        self.df = df
         self.history = {}
         self.cols_selection = []
         self.rows_selection = None
@@ -47,7 +47,7 @@ class DfProcessor:
     def load_csv(self, path:str):
         if not is_file(path):
             raise FileNotFoundError(f"Path is not a file: {path}")
-        file_extension = lower_text(get_file_extension(path))
+        file_extension = lowercase_text(get_file_extension(path))
         if not file_extension == ".csv":
             raise ValueError(f"File extension '{file_extension}' is not supported")
 
@@ -69,7 +69,7 @@ class DfProcessor:
     def load_json(self, path: str, orient: str | None = None):
         if not is_file(path):
             raise FileNotFoundError(f"Path is not a file: {path}")
-        file_extension = lower_text(get_file_extension(path))
+        file_extension = lowercase_text(get_file_extension(path))
         if not file_extension == ".json":
             raise ValueError(f"File extension '{file_extension}' is not supported")
 
@@ -182,12 +182,14 @@ class DfProcessor:
         
         # 1c. Cast input variables
         names_set = set()
+        names_sort_map = None
         keywords_set = set()
  
         if isinstance(names, str):
             names_set.add(names)
         elif isinstance(names, list):
             names_set.update(names)
+            names_sort_map = {name: idx for idx, name in enumerate(names)}
 
         if isinstance(keywords, str):
             keywords_set.add(keywords)
@@ -208,11 +210,19 @@ class DfProcessor:
                     if keyword.lower() in col.lower():
                         consolidated_cols.add(col)
                         break
+        # Cast from set to list
+        consolidated_cols = list(consolidated_cols)
+        
+        # Apply original list order
+        if names_sort_map is not None:
+            for col_name, idx in names_sort_map.items():
+                if col_name in consolidated_cols:
+                    idx_in_cons = consolidated_cols.index(col_name)
+                    col_to_move = consolidated_cols.pop(idx_in_cons)
+                    consolidated_cols.insert(idx, col_to_move)
+        
         # 3. Extend cols selection if exist
-        if self.cols_selection:
-            self.cols_selection.extend(consolidated_cols)
-        else:
-            self.cols_selection = list(consolidated_cols)
+        self.cols_selection.extend(consolidated_cols)
         
         return self
 

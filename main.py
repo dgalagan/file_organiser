@@ -10,7 +10,7 @@ import pandas as pd
 import sys
 import shutil
 from tqdm import tqdm
-from utils.text import lower_text
+from utils.text import uppercase_text
 from utils.json import init_json, load_json, save_json, reset_json
 from utils.path import is_file
 
@@ -54,7 +54,8 @@ modify_dt_tags = [
     "sourcemodified" # 2 instance
 ]
 
-target_path_features = ["DuplicateStatus", "category", "Year", "EXIF:Model", "CombinedFileExtension", "CountExcelWorksheets", "File:FileName"]
+path_generation = ["DuplicateStatus", "category", "Year", "EXIF:Model", "File:FileTypeExtension", "CountExcelWorksheets", "File:FileName"]
+final_report = ["File:FileName", "File:FileSize", "File:FileTypeExtension", "category", "DuplicateStatus", "Year", "EXIF:Model", "CountExcelWorksheets", "TargetPath"]
 
 def main():
     
@@ -73,7 +74,10 @@ def main():
         print(e)
 
     #########      LOAD STORAGE      #########
+    # Change reset parameter
+    # STORAGES_RESET[HASH_STORAGE_NAME] = True
     
+    # Load storages
     storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
         # Initialize storage file
@@ -99,7 +103,7 @@ def main():
     #########      EXTRACT DATA      #########
     
     # Initialize runtime data containers
-    runtime_data = {storage_name: {} for storage_name in storages}
+    runtime_data = {storage_name: {} for storage_name in STORAGES_LOCATION}
     runtime_size = {}
     runtime_mtime = {}
 
@@ -151,89 +155,61 @@ def main():
     for storage_name, updated_data in storages.items():
         try:
             save_json(STORAGES_LOCATION[storage_name], updated_data)
-        except Exception as e:  
-            print(e)
-
-    # Load ref data into runtime
-    for ref_name, ref_path in REFS_LOCATION.items():
-        try:
-            ref_data = load_json(ref_path)
-            runtime_data[ref_name] = ref_data
         except Exception as e:
             print(e)
 
     #########     TRANSFORM DATA     #########
-    # Load runtime data into df
-    runtime_dfs = {}
-    for runtime_key, runtime_dict in runtime_data.items():
-        df = pd.DataFrame.from_dict(runtime_dict, orient="index")
-        runtime_dfs[runtime_key] = df
+    # Load ref data into df
+    refdata_dfs = {}
+    for ref_name, ref_path in REFS_LOCATION.items():
+        try:
+            ref_data = load_json(ref_path)
+            ref_data_df = pd.DataFrame.from_dict(ref_data, orient="index")
+            refdata_dfs[ref_name] = ref_data_df
+        except Exception as e:
+            print(e)
 
-    print(f"TRANSFORM EXIF")
+    # Load runtime data into df
+    metadata_dfs = {}
+    for runtime_key, runtime_dict in runtime_data.items():
+        metadata_df = pd.DataFrame.from_dict(runtime_dict, orient="index")
+        metadata_dfs[runtime_key] = metadata_df
+
+    # Concat metadata dfs
+    full_metadata = pd.concat(metadata_dfs.values(), axis=1)
+    
+    # Join refdata
+    refdata_df = refdata_dfs["extension_mapping.json"]
+    refdata_df = refdata_df.rename(uppercase_text, axis="index")
+    full_df = pd.merge(full_metadata, refdata_df[["category"]], how="left", left_on="File:FileTypeExtension", right_index=True)
+    
+    print(f"TRANSFORM DATA")
     try:
-        exif_processor = DfProcessor()
+        df_processor = DfProcessor(full_df)
         (
-            exif_processor
-            .load_dict(runtime_data[EXIF_STORAGE_NAME], orient="index")
-            .transform(os.path.normpath, col_names="SourceFile")
+            df_processor
             .transform(DateParser().parse, col_keywords=created_dt_tags)
-            .transform(lower_text, col_names="File:FileTypeExtension")
+            .transform(lambda col: col.fillna(value="Other"), func_mode = "col", col_keywords="category")
             .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
             .compute(get_year, store_col="Year", col_names="AggTimestamp")
             .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
-            # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
-            .set_index("SourceFile")
-        )
-    except Exception as e:
-        print(f"{e} while processing exif")
-    
-    print(f"TRANSFORM HASH")
-    try:
-        hash_processor = DfProcessor()
-        (
-            hash_processor
-            .load_dict(runtime_data[HASH_STORAGE_NAME], orient="index", cols=["Hash"])
-            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="Hash")
+            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="hash")
             .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
+            .compute(lambda row: TARGET_DIR + os.sep.join([str(value) for value in row if pd.notna(value)]), func_mode="row", store_col="TargetPath", col_names=path_generation)
+            # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
         )
     except Exception as e:
-        print(f"{e} while processing hash")
+        print(e)
 
-    print(f"TRANSFORM REF")
-    try:
-        category_processor = DfProcessor()
-        (
-            category_processor
-            .load_json("ref\\extension_metadata.json", orient="index")
-        )
-    except Exception as e:
-        print(f"{e} while processing ref data")
+    transformed_df = df_processor.df[final_report]
 
-    print(f"PREPARE MASTER DATA")
-    try:
-        master_df = pd.DataFrame(index=pd.Index(list(files), name="FilePath"))
-        master_df = master_df.join(
-            [
-                hash_processor.df[["Hash", "DuplicateStatus"]],
-                exif_processor.df[["File:FileName", "File:FileSize", "File:FileTypeExtension", "CountExcelWorksheets", "Year", "EXIF:Model", "ID3:Year"]]
-            ],
-            how="left"
-        )
-        master_df["CombinedFileExtension"] = master_df["File:FileTypeExtension"]
-        master_df = pd.merge(master_df, category_processor.df[["category"]], how="left", left_on="CombinedFileExtension", right_index=True)
-        master_df["category"] = master_df["category"].fillna("Other")
-        master_df["TargetPath"] = master_df[target_path_features].apply(lambda row: TARGET_DIR + os.sep.join([str(value) for value in row if pd.notna(value)]), axis=1)
-        
-        if SAVE_REPORT:
-            report_path = TARGET_DIR + os.sep + "report.csv"
-            master_df.to_csv(report_path, encoding="utf-8-sig")
-        
-    except Exception as e:
-        print(f"{e} while processing master")
-    
+    if SAVE_REPORT:
+        report_path = TARGET_DIR + os.sep + "report.csv"
+        transformed_df.to_csv(report_path, encoding="utf-8-sig")
+
     #########     CHECK DISK SPACE    #########
     
-    files_size = master_df["File:FileSize"].sum()
+    files_size = transformed_df["File:FileSize"].sum()
     _, _, free = shutil.disk_usage(TARGET_DIR)
     if files_size >= free:
         print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")

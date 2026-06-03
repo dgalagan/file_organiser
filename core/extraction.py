@@ -50,7 +50,7 @@ def extract_hash_data(files: list[str], config: dict):
 def get_batches(files: list[str], batch_size: int) -> list[list[str]]:
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
 
-def calc_file_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> str:
+def calc_file_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> dict:
     hash_func = getattr(hashlib, hash_algo)
     file_size = os.path.getsize(path)
     file_parts = file_size // parts
@@ -63,6 +63,6 @@ def calc_file_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> str:
                 f.seek(byte_step, 0)
                 data = f.read(read_cap)
                 combined_hash.update(data)
-        return combined_hash.hexdigest()
+        return {"hash": combined_hash.hexdigest()}
     except PermissionError:
-        return None
+        return {}
