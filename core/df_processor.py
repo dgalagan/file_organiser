@@ -30,64 +30,7 @@ class DfProcessor:
         rows = self.rows_filter if not self.rows_filter.empty else pd.Series(True, index=self.df.index)
         cols = self.cols_filter if self.cols_filter else self.df.columns.tolist()
         return self.df.loc[rows, cols]
-
-    def load_list(self, items: list, col: str):
-        if not items:
-            raise EmptyDataError("No data to process")
-        if not isinstance(items, list):
-            raise TypeError("paths should be a list")
-        
-        # Load paths
-        self.df[col] = items
-        return self
-
-    def load_dict(self, items: dict | list[dict], orient: str | None = None, cols = None):
-        if not items:
-            raise EmptyDataError("No data to process")
-        # if not isinstance(items, dict):
-        #     raise TypeError("paths should be a list")
-        
-        # Load paths
-        self.df = self.df.from_dict(items, orient=orient, columns=cols)
-
-        return self
     
-    def load_csv(self, path:str):
-        if not is_file(path):
-            raise FileNotFoundError(f"Path is not a file: {path}")
-        file_extension = lowercase_text(get_file_extension(path))
-        if not file_extension == ".csv":
-            raise ValueError(f"File extension '{file_extension}' is not supported")
-
-        self.df = pd.read_csv(path)
-
-        return self
-
-    def load_excel(self, path:str):
-        if not is_file(path):
-            raise FileNotFoundError(f"Path is not a file: {path}")
-        # file_extension = lower_text(get_file_extension(path))
-        # if not file_extension == ".csv":
-        #     raise ValueError(f"File extension '{file_extension}' is not supported")
-
-        self.df = pd.read_excel(path)
-
-        return self
-
-    def load_json(self, path: str, orient: str | None = None):
-        if not is_file(path):
-            raise FileNotFoundError(f"Path is not a file: {path}")
-        file_extension = lowercase_text(get_file_extension(path))
-        if not file_extension == ".json":
-            raise ValueError(f"File extension '{file_extension}' is not supported")
-
-        self.df = pd.read_json(path, orient=orient)
-        return self
-
-    def set_index(self, col: str):
-        self.df = self.df.set_index(col)
-        return self
-
     def _backup(self, cols):
         for col in cols:
             if col not in self.history:
@@ -237,22 +180,6 @@ class DfProcessor:
         
         return self
 
-    # def filter_rows(self, condition = None):
-        
-    #     # Behavior: 
-    #     # overrides,                 if 'condition' provided. 
-    #     # preserves existing state,  if 'condition' absent
-        
-    #     # 1. Exit if nothing is provided
-    #     if not condition:
-    #         return self
-        
-    #     # 2. Update attribute
-    #     if callable(condition):
-    #         self.rows_filter = condition(self.df)
-
-    #     return self
-   
     def filter_rows(self, cond = None):
 
         if self.rows_filter.empty:

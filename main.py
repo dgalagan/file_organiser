@@ -1,10 +1,9 @@
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.ref_cfg import REFS_LOCATION
-from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
+from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, fill_missing_values, assemble_target_path
 from core.df_processor import DfProcessor
 import os
 import pandas as pd

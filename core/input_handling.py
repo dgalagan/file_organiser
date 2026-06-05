@@ -65,7 +65,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 return None, MenuActions.INTERUPT
             # Open CSV
             try:
-                processor = DfProcessor().load_csv(csv_path).run_pipeline(PIPELINE["path_input"])
+                df = pd.read_csv(csv_path)
             except (ValueError, FileNotFoundError, PermissionError, EmptyDataError, ParserError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
@@ -75,19 +75,19 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             print(render_cli_grouped_object(cli_grouped_objects["manual_menu"], cli_objects))
             # Request user input
             try:
-                input_dirs = []
+                input_dirs = {"DirPath": []}
                 while True:
                     prompt_key = "manual" if not input_dirs else "manual_additional"
                     input_dir = input(render_cli_object(cli_objects["prompt"], prompt_key))
                     input_dir = strip_text(input_dir)
                     if input_dir == "stop":
                         break
-                    input_dirs.append(input_dir)
+                    input_dirs["DirPath"].append(input_dir)
             except KeyboardInterrupt:
                 print()
                 return None, MenuActions.INTERUPT
             try:
-                processor = DfProcessor().load_list(input_dirs, col="DirPath").run_pipeline(PIPELINE["path_input"])
+                df = pd.DataFrame(input_dirs)
             except (TypeError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
                 continue
@@ -95,20 +95,9 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
         else:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
-        # Normalize and enrich loaded data
-        # for step in PIPELINE["path_input"]:
-        #     op = step.get("op")
-        #     if op == "compute":
-        #         func, mode = step.get("func")
-        #         processor.compute(func, func_mode=mode, calc_col=step.get("calc_col"), use_cols=step.get("use_cols"))
-        #     elif op == "transform":
-        #         func, mode = step.get("func")
-        #         processor.compute(func, func_mode=mode, use_cols=step.get("use_cols"))
-        #     elif op == "filter_rows":
-        #         processor.filter_rows(condition=step.get("cond"))
-        
+
         # Get data
-        dir_data = processor.active_selection.sort_values("DirDepth", ascending=True)
+        dir_data = DfProcessor(df).run_pipeline(PIPELINE["path_input"]).active_selection.sort_values("DirDepth", ascending=True)
         # Resolve parent-child relationship clash
         reload = False
         processed_dirs = []
@@ -297,7 +286,6 @@ cli_grouped_objects = {
 }
 
 ## Result
-
 def setup_environment(path: str) -> bool:
     # If path does not exist, create it
     if not os.path.exists(path):
