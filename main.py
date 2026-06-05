@@ -1,9 +1,10 @@
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET, EXIF_STORAGE_NAME, HASH_STORAGE_NAME
+from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from core.input_handling import setup_environment, get_user_input
 from core.scanning import get_scope
-from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate
+from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, fill_missing_values, assemble_target_path
 from core.df_processor import DfProcessor
 import os
 import pandas as pd
@@ -54,8 +55,7 @@ modify_dt_tags = [
     "sourcemodified" # 2 instance
 ]
 
-path_generation = ["DuplicateStatus", "category", "Year", "EXIF:Model", "File:FileTypeExtension", "CountExcelWorksheets", "File:FileName"]
-final_report = ["File:FileName", "File:FileSize", "File:FileTypeExtension", "category", "DuplicateStatus", "Year", "EXIF:Model", "CountExcelWorksheets", "TargetPath"]
+final_report = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
 
 def main():
     
@@ -163,9 +163,10 @@ def main():
     refdata_dfs = {}
     for ref_name, ref_path in REFS_LOCATION.items():
         try:
-            ref_data = load_json(ref_path)
-            ref_data_df = pd.DataFrame.from_dict(ref_data, orient="index")
-            refdata_dfs[ref_name] = ref_data_df
+            refdata = load_json(ref_path)
+            refdata_df = pd.DataFrame.from_dict(refdata, orient="index")
+            refdata_df = refdata_df.rename(columns=COLUMNS_ALIASES[ref_name]).rename(uppercase_text, axis="index")
+            refdata_dfs[ref_name] = refdata_df
         except Exception as e:
             print(e)
 
@@ -173,43 +174,25 @@ def main():
     metadata_dfs = {}
     for runtime_key, runtime_dict in runtime_data.items():
         metadata_df = pd.DataFrame.from_dict(runtime_dict, orient="index")
+        metadata_df = metadata_df.rename(columns=COLUMNS_ALIASES[runtime_key])
+        metadata_df = DfProcessor(metadata_df).run_pipeline(PIPELINE[runtime_key]).df
         metadata_dfs[runtime_key] = metadata_df
 
     # Concat metadata dfs
     full_metadata = pd.concat(metadata_dfs.values(), axis=1)
-    
+
     # Join refdata
     refdata_df = refdata_dfs["extension_mapping.json"]
-    refdata_df = refdata_df.rename(uppercase_text, axis="index")
-    full_df = pd.merge(full_metadata, refdata_df[["category"]], how="left", left_on="File:FileTypeExtension", right_index=True)
-    
-    print(f"TRANSFORM DATA")
-    try:
-        df_processor = DfProcessor(full_df)
-        (
-            df_processor
-            .transform(DateParser().parse, col_keywords=created_dt_tags)
-            .transform(lambda col: col.fillna(value="Other"), func_mode = "col", col_keywords="category")
-            .compute(pd.Series.min, func_mode="row", store_col="AggTimestamp", col_keywords=created_dt_tags)
-            .compute(get_year, store_col="Year", col_names="AggTimestamp")
-            .compute(get_worksheets_count, store_col="CountExcelWorksheets", col_names="XML:HeadingPairs")
-            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="hash")
-            .compute(label_duplicate, store_col="DuplicateStatus", col_names="isDuplicate")
-            .compute(lambda row: TARGET_DIR + os.sep.join([str(value) for value in row if pd.notna(value)]), func_mode="row", store_col="TargetPath", col_names=path_generation)
-            # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
-        )
-    except Exception as e:
-        print(e)
-
-    transformed_df = df_processor.df[final_report]
+    enriched_df = pd.merge(full_metadata, refdata_df[["Category"]], how="left", left_on="FileExtension", right_index=True)
+    target_path_df = DfProcessor(enriched_df).run_pipeline(PIPELINE["target_path"]).df
 
     if SAVE_REPORT:
         report_path = TARGET_DIR + os.sep + "report.csv"
-        transformed_df.to_csv(report_path, encoding="utf-8-sig")
+        target_path_df[final_report].to_csv(report_path, encoding="utf-8-sig")
 
     #########     CHECK DISK SPACE    #########
     
-    files_size = transformed_df["File:FileSize"].sum()
+    files_size = target_path_df["FileSize"].sum()
     _, _, free = shutil.disk_usage(TARGET_DIR)
     if files_size >= free:
         print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")

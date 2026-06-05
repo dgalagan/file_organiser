@@ -28,7 +28,10 @@ def extract_exif_data(files: list[str], config: dict):
         else:
             for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
                 raw_output = et.execute(*args, file)
-                file_result = json.loads(raw_output)
+                try:
+                    file_result = json.loads(raw_output)
+                except Exception as e:
+                    file_result = {}
                 if isinstance(file_result, list) and len(file_result) == 1:
                     yield file, file_result[0]
                 elif isinstance(file_result, dict):

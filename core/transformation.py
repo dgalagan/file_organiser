@@ -1,5 +1,7 @@
 import datetime as dt
 import json
+import pandas as pd
+import os
 from utils.text import get_chars_pattern
 
 class DateParser:
@@ -69,8 +71,23 @@ def get_worksheets_count(heading_pairs: list) -> int:
 
     return None
 
-def label_duplicate(value):
+def label_duplicate(value: str):
     return "duplicate" if value else "original"
+
+def fill_missing_values(filler: str):
+    
+    def fill_column(col: pd.Series) -> pd.Series:
+        return col.fillna(value=filler)
+    
+    return fill_column
+
+def assemble_target_path(target_dir: str):
+    
+    def build_path(row: pd.Series) -> pd.Series:
+        path_fragments = [str(value) for value in row if pd.notna(value)]
+        return os.path.join(target_dir, *path_fragments)
+
+    return build_path
 
 def calculate_coverage(json_path: str):
     exif_meta = json.load(json_path)

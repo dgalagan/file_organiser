@@ -1,10 +1,18 @@
 import pandas as pd
+import operator
 from utils.path import is_file, get_file_extension
 from utils.text import lowercase_text
 
 # To improve:
 # incorporate schema validation
 # automate file loading process
+
+OPERATORS = {
+    "AND": operator.and_,
+    "OR": operator.or_,
+    "==": operator.eq,
+    "!=": operator.ne
+}
 
 class EmptyDataError(Exception):
     pass
@@ -13,13 +21,14 @@ class DfProcessor:
     def __init__(self, df: pd.DataFrame = pd.DataFrame()):
         self.df = df
         self.history = {}
-        self.cols_selection = []
-        self.rows_selection = None
+        self.cols_filter = []
+        self.rows_filter = None
+        self.rows_filter_exp = pd.Series(True, index=df.index)
 
     @property
-    def active_selection(self):
-        rows = self.rows_selection if self.rows_selection is not None else slice(None)
-        cols = self.cols_selection if self.cols_selection else self.df.columns.tolist()
+    def active_selection(self) -> pd.DataFrame:
+        rows = self.rows_filter if self.rows_filter is not None else slice(None)
+        cols = self.cols_filter if self.cols_filter else self.df.columns.tolist()
         return self.df.loc[rows, cols]
 
     def load_list(self, items: list, col: str):
@@ -32,7 +41,7 @@ class DfProcessor:
         self.df[col] = items
 
         return self
-    
+
     def load_dict(self, items: dict | list[dict], orient: str | None = None, cols = None):
         if not items:
             raise EmptyDataError("No data to process")
@@ -105,13 +114,13 @@ class DfProcessor:
         else:
             print(f"Incompatible func mode for pd.DataFrame {func}")
 
-    def compute(self, func, func_mode="element", store_col = "", col_names = None, col_keywords = None, row_condition = None):
-        
-        # 1. Overrides selection attributes if criterion provided
-        self.set_cols_selection(names=col_names, keywords=col_keywords).set_rows_selection(condition=row_condition)
+    def compute(self, func, func_mode, calc_col = "", use_cols = None, use_keywords = None, row_condition = None):
 
-        rows = self.rows_selection if self.rows_selection is not None else slice(None)
-        cols = self.cols_selection if self.cols_selection else self.df.columns.tolist()
+        # 1. Overrides selection attributes if criterion provided
+        self.filter_cols(names=use_cols, keywords=use_keywords).filter_rows(condition=row_condition)
+
+        rows = self.rows_filter if self.rows_filter is not None else slice(None, None, None)
+        cols = self.cols_filter if self.cols_filter else self.df.columns.tolist()
 
         # 2. Execute based on mode
         subset = self.df.loc[rows, cols]
@@ -120,27 +129,27 @@ class DfProcessor:
 
         # 3. Assign result
         if isinstance(result, pd.DataFrame):
-            result = result.rename(columns={result.columns[0]: store_col})
+            result = result.rename(columns={result.columns[0]: calc_col})
             self.df = self.df.join(result, how="left")
         elif isinstance(result, pd.Series):
-            self.df = self.df.join(result.rename(store_col), how="left")
+            self.df = self.df.join(result.rename(calc_col), how="left")
 
         # 4. Reset selection attributes
-        if col_names is not None or col_keywords is not None:
-            self.reset_cols_selection()
+        if use_cols is not None or use_keywords is not None:
+            self.reset_cols_filter()
         if row_condition is not None:
-            self.reset_rows_selection()
+            self.reset_rows_filter()
 
         return self
 
-    def transform(self, func, func_mode = "element", backup = True, *, col_names = None, col_keywords = None, row_condition = None):
+    def transform(self, func, func_mode, use_cols = None, use_keywords = None, row_condition = None, backup = True):
 
         # 1. Overrides selection attributes if criterion provided
-        self.set_cols_selection(names=col_names, keywords=col_keywords).set_rows_selection(condition=row_condition)
+        self.filter_cols(names=use_cols, keywords=use_keywords).filter_rows(condition=row_condition)
 
         # 2. If row, col selection not exist, select all
-        rows = self.rows_selection if self.rows_selection is not None else slice(None, None, None)
-        cols = self.cols_selection if self.cols_selection else self.df.columns.to_list()
+        rows = self.rows_filter if self.rows_filter is not None else slice(None, None, None)
+        cols = self.cols_filter if self.cols_filter else self.df.columns.to_list()
 
         # 2. Check if backup required
         if backup:
@@ -159,14 +168,14 @@ class DfProcessor:
         self.df[cols] = self.df[cols].convert_dtypes()
 
         # 5. Reset selection attributes
-        if col_names is not None or col_keywords is not None:
-            self.reset_cols_selection()
+        if use_cols is not None or use_keywords is not None:
+            self.reset_cols_filter()
         if row_condition is not None:
-            self.reset_rows_selection()
+            self.reset_rows_filter()
 
         return self
 
-    def set_cols_selection(self, names: str | list[str] = None, keywords: str | list[str] = None):
+    def filter_cols(self, names: str | list[str] = None, keywords: str | list[str] = None):
         
         # Behavior: 
             # overrides,                 if at least one 'names' or 'keywords' is provided. 
@@ -222,11 +231,11 @@ class DfProcessor:
                     consolidated_cols.insert(idx, col_to_move)
         
         # 3. Extend cols selection if exist
-        self.cols_selection.extend(consolidated_cols)
+        self.cols_filter.extend(consolidated_cols)
         
         return self
 
-    def set_rows_selection(self, condition = None):
+    def filter_rows(self, condition = None):
         
         # Behavior: 
         # overrides,                 if 'condition' provided. 
@@ -238,18 +247,50 @@ class DfProcessor:
         
         # 2. Update attribute
         if callable(condition):
-            self.rows_selection = condition(self.df)
+            self.rows_filter = condition(self.df)
 
         return self
-
-    def reset_rows_selection(self):
-        self.rows_selection = None
+   
+    def filter_rows_exp(self, cond = None):
+        
+        is_empty = self.rows_filter_exp.empty
+        if is_empty:
+            self.rows_filter_exp = pd.Series(True, index = self.df.index)
+        
+        mask_junc_func = OPERATORS.get(cond.get("mask_junc"))
+        comparator_func = OPERATORS.get(cond.get("comparator"))
+        cond_col = cond.get("col")
+        cond_val = cond.get("val")
+        cond_mask =  comparator_func(self.df[cond_col], cond_val)
+        self.rows_filter_exp = mask_junc_func(self.rows_filter_exp, cond_mask) 
+        
         return self
 
-    def reset_cols_selection(self):
-        self.cols_selection = []
+    def reset_rows_filter(self):
+        self.rows_filter = None
         return self
 
-    def sort(self, col: str, ascending=True):
-        self.df = self.df.sort_values(col, ascending=ascending)
+    def reset_cols_filter(self):
+        self.cols_filter = []
+        return self
+    
+    def run_pipeline(self, pipeline: list[dict]):
+        for step in pipeline:
+            op = step.get("op")
+            if op == "compute":
+                func, mode = step.get("func")
+                calc_col = step.get("calc_col")
+                use_cols = step.get("use_cols")
+                use_keywords = step.get("use_keywords")
+                self.compute(func, func_mode=mode, calc_col=calc_col, use_cols=use_cols, use_keywords=use_keywords)
+            elif op == "transform":
+                func, mode = step.get("func")
+                use_cols = step.get("use_cols")
+                use_keywords = step.get("use_keywords")
+                self.transform(func, func_mode=mode, use_cols=use_cols, use_keywords=use_keywords)
+            elif op == "filter_rows":
+                self.filter_rows(condition=step.get("cond"))
+            elif op == "filter_rows_exp":
+                condition = step.get("cond")
+                self.filter_rows_exp(cond=condition)
         return self

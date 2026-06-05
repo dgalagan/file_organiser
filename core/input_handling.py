@@ -8,6 +8,7 @@ import pandas as pd
 import sys
 from utils.path import is_not_dir, is_parent, get_normalized_path, get_dir_depth, get_branch_depth, clean_dir
 from utils.text import lowercase_text, strip_text
+from configs.transformation_cfg import PIPELINE
 
 # To improve:
 # instead of os.walk(), create recursion based on os.scandir()
@@ -64,7 +65,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 return None, MenuActions.INTERUPT
             # Open CSV
             try:
-                processor = DfProcessor().load_csv(csv_path)
+                processor = DfProcessor().load_csv(csv_path).run_pipeline(PIPELINE["path_input"])
             except (ValueError, FileNotFoundError, PermissionError, EmptyDataError, ParserError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
@@ -86,7 +87,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 print()
                 return None, MenuActions.INTERUPT
             try:
-                processor = DfProcessor().load_list(input_dirs, col="DirPath")
+                processor = DfProcessor().load_list(input_dirs, col="DirPath").run_pipeline(PIPELINE["path_input"])
             except (TypeError, EmptyDataError) as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
                 continue
@@ -95,19 +96,19 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
         # Normalize and enrich loaded data
-        (
-            processor
-            .transform(get_normalized_path, col_names="DirPath")
-            .compute(is_not_dir, store_col="isInvalid",  col_names="DirPath")
-            .compute(pd.Series.duplicated, func_mode="col", store_col="isDuplicate", col_names="DirPath")
-            .set_rows_selection(condition=lambda df: ~df["isInvalid"] & ~df["isDuplicate"])
-            .compute(get_dir_depth, store_col="DirDepth", col_names="DirPath")
-            .compute(get_branch_depth, store_col="BranchDepth", col_names="DirPath")
-            .compute(lambda row: row["BranchDepth"] - row["DirDepth"], func_mode="row", store_col="BranchDepthFromDir", col_names=["BranchDepth", "DirDepth"])
-            .sort(col="DirDepth")
-        )
+        # for step in PIPELINE["path_input"]:
+        #     op = step.get("op")
+        #     if op == "compute":
+        #         func, mode = step.get("func")
+        #         processor.compute(func, func_mode=mode, calc_col=step.get("calc_col"), use_cols=step.get("use_cols"))
+        #     elif op == "transform":
+        #         func, mode = step.get("func")
+        #         processor.compute(func, func_mode=mode, use_cols=step.get("use_cols"))
+        #     elif op == "filter_rows":
+        #         processor.filter_rows(condition=step.get("cond"))
+        
         # Get data
-        dir_data = processor.active_selection
+        dir_data = processor.active_selection.sort_values("DirDepth", ascending=True)
         # Resolve parent-child relationship clash
         reload = False
         processed_dirs = []
