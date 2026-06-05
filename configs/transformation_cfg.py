@@ -1,7 +1,6 @@
 from configs.storage_cfg import EXIF_STORAGE_NAME, HASH_STORAGE_NAME
 from configs.ref_cfg import EXTENSION_MAPPING_NAME
 from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, fill_missing_values, assemble_target_path
-import operator
 import pandas as pd
 from utils.path import is_not_dir, get_normalized_path, get_dir_depth, get_branch_depth
 
@@ -42,8 +41,8 @@ PIPELINE = {
         {"op": "compute",      "func": (is_not_dir, "element"),                  "calc_col": "isInvalid",          "use_cols": "DirPath"},
         {"op": "compute",      "func": (pd.Series.duplicated, "col"),            "calc_col": "isDuplicate",        "use_cols": "DirPath"},
         # {"op": "filter_rows",  "cond": lambda df: ~df["isInvalid"] & ~df["isDuplicate"]                                                 },
-        {"op": "filter_rows_exp",  "cond": {"col": "isInvalid",     "comparator": "==", "val": False, "mask_junc": "AND"}               },
-        {"op": "filter_rows_exp",  "cond": {"col": "isDuplicate",   "comparator": "==", "val": False, "mask_junc": "AND"}               },
+        {"op": "filter_rows",  "cond": {"col": "isInvalid",   "comparator": "==", "val": False, "mask_junc": "AND"}},
+        {"op": "filter_rows",  "cond": {"col": "isDuplicate", "comparator": "==", "val": False, "mask_junc": "AND"}},
         {"op": "compute",      "func": (get_dir_depth, "element"),               "calc_col": "DirDepth",           "use_cols": "DirPath"},
         {"op": "compute",      "func": (get_branch_depth, "element"),            "calc_col": "BranchDepth",        "use_cols": "DirPath"},
         {"op": "compute",      "func": (lambda r: r.iloc[0] - r.iloc[1], "row"), "calc_col": "BranchDepthFromDir", "use_cols": ["BranchDepth", "DirDepth"]},
@@ -64,10 +63,3 @@ PIPELINE = {
     ]
 }
 # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
-
-filter_rows = {
-    "op": "filter_rows",
-    "conditions": [{"col": "isInvalid", "value": False, "comparator": operator.eq}, {"col": "isDuplicate", "value": False, "comparator": operator.eq}],
-    "logical_operators": [operator.and_, operator.and_]
-}
-
