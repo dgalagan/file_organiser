@@ -16,9 +16,6 @@ from utils.text import uppercase_text
 from utils.json import init_json, load_json, save_json, reset_json
 from utils.path import is_file
 
-# manage lowercase path cases in manual input
-# final_report = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
-
 def main():
     
     #########        SETUP ENV       #########

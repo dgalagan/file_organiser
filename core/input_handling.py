@@ -14,6 +14,7 @@ from configs.transformation_cfg import PIPELINE
 # instead of os.walk(), create recursion based on os.scandir()
 # self-reporting improvement
 # review error handling
+# manage lowercase path cases in manual input
 
 # Actions
 class MenuActions(StrEnum):
