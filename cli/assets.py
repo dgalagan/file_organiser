@@ -1,6 +1,7 @@
 class Template:
     SEP_MSG_SEP = "{start}{sep}{msg:^{width}}{sep}"
     ICON_SEP_MSG = "{start}{icon}{sep}{msg}"
+
 class Token:
     def __init__(self, token: str):
         self.token = token
@@ -14,6 +15,7 @@ class Token:
         return self.token * count
     def __str__(self):
         return self.token
+
 class Delimiter:
     SPACE = Token(" ")
     DASH = Token("-")
@@ -21,6 +23,7 @@ class Delimiter:
     PIPE = Token("|")
     FORWARDSLASH = Token("/")
     BACKSLASH = Token("\\")
+
 class Emoji:
     KEYBOARD = Token('⌨️')
     CHECKMARK = Token('✅')
@@ -35,5 +38,6 @@ class Emoji:
     BULLSEYE = Token('🎯')
     HOURGLASS = Token('⏳')
     CHEQUEREDFLAG = Token('🏁')
+
 class Icon:
     DOWNARROW = Token("↓")

@@ -36,11 +36,10 @@ COLUMN_TAGS = {
 path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExtension", "CountWorksheets", "FileName"]
 
 PIPELINE = {
-    "path_input": [
+    "user_dirs": [
         {"op": "transform",    "func": (get_normalized_path, "element"),                                           "use_cols": "DirPath"},
         {"op": "compute",      "func": (is_not_dir, "element"),                  "calc_col": "isInvalid",          "use_cols": "DirPath"},
         {"op": "compute",      "func": (pd.Series.duplicated, "col"),            "calc_col": "isDuplicate",        "use_cols": "DirPath"},
-        # {"op": "filter_rows",  "cond": lambda df: ~df["isInvalid"] & ~df["isDuplicate"]                                                 },
         {"op": "filter_rows",  "cond": {"col": "isInvalid",   "comparator": "==", "val": False, "mask_junc": "AND"}},
         {"op": "filter_rows",  "cond": {"col": "isDuplicate", "comparator": "==", "val": False, "mask_junc": "AND"}},
         {"op": "compute",      "func": (get_dir_depth, "element"),               "calc_col": "DirDepth",           "use_cols": "DirPath"},

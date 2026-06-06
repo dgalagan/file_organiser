@@ -1,4 +1,4 @@
-from cli.assets import Delimiter, Emoji, Icon, Template
+from cli.assets import Delimiter, Icon
 from cli.renderer import render_cli_object, render_cli_grouped_object
 from core.df_processor import DfProcessor, EmptyDataError
 from enum import StrEnum, auto
@@ -6,7 +6,7 @@ import os
 from pandas.errors import ParserError
 import pandas as pd
 import sys
-from utils.path import is_not_dir, is_parent, get_normalized_path, get_dir_depth, get_branch_depth, clean_dir
+from utils.path import is_parent, iter_dir_hierarchy
 from utils.text import lowercase_text, strip_text
 from configs.transformation_cfg import PIPELINE
 
@@ -27,7 +27,7 @@ class MenuActions(StrEnum):
     RESTART = auto()
 
 ## Loops
-def main_loop(cli_grouped_objects: dict, cli_objects: dict): # 1st level
+def get_user_dirs(cli_grouped_objects: dict, cli_objects: dict): # 1st level
     while True:
         # Render menu
         print(render_cli_grouped_object(cli_grouped_objects["main_menu"], cli_objects))
@@ -51,6 +51,7 @@ def main_loop(cli_grouped_objects: dict, cli_objects: dict): # 1st level
             case MenuActions.SUCCESS:
                 print(Delimiter.DASH.repeat(80))
                 return selected_dirs
+
 def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str): # 2nd level
     while True:
         # CSV Load
@@ -95,9 +96,8 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
         else:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
-
         # Get data
-        dir_data = DfProcessor(df).run_pipeline(PIPELINE["path_input"]).active_selection.sort_values("DirDepth", ascending=True)
+        dir_data = DfProcessor(df).run_pipeline(PIPELINE["user_dirs"]).active_selection.sort_values("DirDepth", ascending=True)
         # Resolve parent-child relationship clash
         reload = False
         processed_dirs = []
@@ -149,6 +149,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
         print(render_cli_object(cli_objects["info"], "selected", dir_paths_count=len(selected_dirs)))
 
         return selected_dirs, MenuActions.SUCCESS
+
 def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_dir: int): # 3rd level
     while True:
         # Render menu
@@ -177,148 +178,21 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_d
             except ValueError:
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
 
-cli_objects = {  
-    "header": {
-        "template": Template.SEP_MSG_SEP,
-        "defaults": {
-            "start": "\n",
-            "sep": Delimiter.DASH,
-            "msg": "empty"
-        },
-        "elements":{
-            "setup_env": {"sep": Delimiter.DASH.repeat(30), "msg": "Setup Env", "width": 20},
-            "main": {"sep": Delimiter.DASH.repeat(30), "msg": "Input Methods", "width": 20},
-            "csv_load": {"sep": Delimiter.DASH.repeat(30), "msg": "CSV load", "width": 20},
-            "manual_load": {"sep": Delimiter.DASH.repeat(30), "msg": "Manual load", "width": 20},
-            "depth": {"sep": Delimiter.DASH.repeat(30), "msg": "Depth", "width": 20}
-        }
-    },
-    "menu_line": {
-        "template": Template.ICON_SEP_MSG,
-        "defaults": {
-            "start": "",
-            "icon": Emoji.KEYBOARD,
-            "sep": Delimiter.SPACE.repeat(2),
-            "msg": "empty"
-        },
-        "elements": {
-            "exit": {"icon": Emoji.CROSSMARK, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to suspend the script"},
-            "cancel": {"icon": Emoji.LEFTWARDARROW, "msg": "Press 'Ctrl+C' to cancel"},
-            "restart": {"icon": Emoji.RESTART, "sep": Delimiter.SPACE, "msg": "Press 'Ctrl+C' to cancel current input and retry"},
-            "skip": {"msg": "Type 'skip' to skip current dir path"},
-            "skip_all": {"msg": "Type 'skipall' to skip the rest of dir path(s)"},
-            "csv_load": {"msg": "Type 'csv' to load dir path(s) from CSV"},
-            "manual_load": {"msg": "Type 'manual' to provide dir path(s) directly in CLI"},
-            "manual_stop": {"msg": "Type 'stop' to finish adding dir path(s)"},
-            "depth": {"msg": "Select 'depth level' from {depth_range}"}
-        }
-    },
-    "prompt": {
-        "template": Template.ICON_SEP_MSG,
-        "defaults": {
-            "start": "",
-            "icon": Emoji.RIGHTARROW,
-            "sep": Delimiter.SPACE.repeat(2),
-            "msg": "Provide your option: "
-        },
-        "elements": {
-            "setup_env": {"msg": "Delete content from {target_path} permanently? (y/n): "},
-            "csv": {"msg": "Enter link to CSV file: "},
-            "manual": {"msg": "Enter dir path: "},
-            "manual_additional": {"msg": "Add another one: "},
-        }
-    },
-    "warning": {
-        "template": Template.ICON_SEP_MSG,
-        "defaults": {
-            "start": "",
-            "icon": Emoji.WARNINGSIGN,
-            "sep": Delimiter.SPACE.repeat(2),
-            "msg": "empty"
-        },
-        "elements": {
-            "invalid_input": {"msg": "Invalid input"}, # General
-            "empty_input": {"msg": "No dir path(s) to process"}, # General
-            "csv_load_failed": {"msg": "CSV path load failed with the reason - {error}"}, # CSV
-            "manual_load_failed": {"msg": "Manual path load failed with the reason - {error}"}, # CSV
-        }
-    },
-    "info": {
-        "template": Template.ICON_SEP_MSG,
-        "defaults": {
-            "start": "",
-            "icon": Emoji.INFORMATION,
-            "sep": Delimiter.SPACE.repeat(2),
-            "msg": "empty"
-        },
-        "elements": {
-            "exit": {"msg": "Script terminated"},
-            "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {dir_path}"},
-            "added": {"msg": "[Added] -----> {dir_paths_count} dirs"},
-            "skipped": {"msg": "[Skipped] -----> as already in scope"},
-            "selected":{"icon": Emoji.BULLSEYE, "sep": Delimiter.SPACE.repeat(1), "msg": "[Selected] -----> {dir_paths_count} dirs"},
-            "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Files aquisition completed"},
-        }
-    },
-}
-cli_grouped_objects = {
-    "main_menu": [
-        ("header", "main"),
-        ("menu_line", "exit"),
-        ("menu_line", "csv_load"),
-        ("menu_line", "manual_load")
-    ],
-    "csv_menu": [
-        ("header", "csv_load"),
-        ("menu_line", "cancel")
-    ],
-    "manual_menu": [
-        ("header", "manual_load"),
-        ("menu_line", "cancel"),
-        ("menu_line", "manual_stop")
-    ],
-    "depth_menu": [
-        ("menu_line", "cancel"),
-        ("menu_line", "skip_all"),
-        ("menu_line", "skip"),
-        ("menu_line", "depth")
-    ]
-}
-
-## Result
-def setup_environment(path: str) -> bool:
-    # If path does not exist, create it
-    if not os.path.exists(path):
-        try:
-            os.makedirs(path)
-            return True
-        except Exception as e:
-            print(f"Error creating directory: {e}")
-            print(Icon.DOWNARROW.repeat(3))
-            print(render_cli_object(cli_objects["info"], "exit"))
-            return False
-
-    # If directory empty, moving forward
-    dir_content = os.listdir(path)
-    if not dir_content:
-        return True
-    
-    # Interact with user in case directory has files
-    while True:
-        print(render_cli_object(cli_objects["header"], element_name="setup_env"))
-        permission = input(render_cli_object(cli_objects["prompt"], element_name="setup_env", target_path=path))
-        if permission == "y":
-            success = clean_dir(path)
-            print(Icon.DOWNARROW.repeat(3))
-            print("Done" if success else "Failed")
-            return success
-        elif permission == "n":
-            print(Icon.DOWNARROW.repeat(3))
-            print("Cancelled")
-            print(Icon.DOWNARROW.repeat(3))
-            print(render_cli_object(cli_objects["info"], "exit"))
-            return False
-        else:
-            print(render_cli_object(cli_objects["warning"], "invalid_input"))
-def get_user_input():
-    return main_loop(cli_grouped_objects, cli_objects)
+def get_scope(input_dirs: list[str]):
+    dirs = set()
+    files = set()
+    for input_dir, max_depth in input_dirs:
+        print(f"Exrtacting files from '{input_dir}'")
+        dirs_counter = 0
+        files_counter = 0
+        for depth, dir, filenames in iter_dir_hierarchy(input_dir, max_depth):
+            dirs.add(dir)
+            dirs_counter += 1
+            for filename in filenames:
+                file_path = os.path.join(dir, filename)
+                files.add(file_path)
+                files_counter += 1
+        print(f"↓↓↓")
+        print(f"{dirs_counter} dirs scanned, {files_counter} files extracted")
+        print(f"--------------------------------------------------------------------------------")
+    return dirs, files

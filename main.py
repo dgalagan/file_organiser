@@ -1,9 +1,10 @@
-from configs.extraction_cfg import EXTRACTION_CFG
+from configs.cli_cfg import cli_objects, cli_grouped_objects
 from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
+from configs.extraction_cfg import EXTRACTION_CFG
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
-from core.input_handling import setup_environment, get_user_input
-from core.scanning import get_scope
+from core.env_setup import setup_environment
+from core.input_handling import get_user_dirs, get_scope
 from core.df_processor import DfProcessor
 import os
 import pandas as pd
@@ -15,11 +16,8 @@ from utils.json import init_json, load_json, save_json, reset_json
 from utils.path import is_file
 
 # manage lowercase path cases in manual input
-
 TARGET_DIR = "D:\\MyOrganizedFiles\\"
 SAVE_REPORT = True
-
-# datetime tags
 created_dt_tags = [
     # "exe:timestamp", # specific, actually holds date
     # "xmp:timestamp", # specific, actually holds date
@@ -39,21 +37,6 @@ created_dt_tags = [
     # "releasetime", # 2 instance
     # "originalreleaseyear", # 1 instance
 ]
-access_dt_tags = [
-    "accessdate",
-    "lastplayed",
-    "lastprinted",
-]
-modify_dt_tags = [
-    "datemodify", # 1 instance
-    "lastsaved", # 4 instance
-    "lastupdated" # 0 instance
-    "moddate", # 0 instance
-    "modifydate", # 17 instance
-    "metadatadate", # 2 instance
-    "sourcemodified" # 2 instance
-]
-
 final_report = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
 
 def main():
@@ -65,17 +48,13 @@ def main():
         return 1
     
     #########       USER INPUT       #########
-    
     try:
-        input_dirs = get_user_input()
+        input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
         dirs, files = get_scope(input_dirs)
     except Exception as e:
         print(e)
 
     #########      LOAD STORAGE      #########
-    # Change reset parameter
-    # STORAGES_RESET[HASH_STORAGE_NAME] = True
-    
     # Load storages
     storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
@@ -134,7 +113,7 @@ def main():
     # Handle processing queue
     for storage_name, files_to_process in processing_queue.items():
         # Load storage
-        storage = storages.get(storage_name, {})
+        storage_data = storages.get(storage_name, {})
         # Load storage config
         extraction_cfg = EXTRACTION_CFG.get(storage_name, {})
         cfg_str = extraction_cfg.get("cfg_str", '')
@@ -145,15 +124,13 @@ def main():
                 # Update runtime container
                 runtime_data[storage_name][processed_file] = data
                 # Update storage
-                if processed_file not in storage:
-                    storage[processed_file] = {cfg_str: {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
+                if processed_file not in storage_data:
+                    storage_data[processed_file] = {cfg_str: {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
                 else:
-                    storage[processed_file][cfg_str] = {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
-
-    # Save updated data
-    for storage_name, updated_data in storages.items():
+                    storage_data[processed_file][cfg_str] = {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
+        # Save updated data
         try:
-            save_json(STORAGES_LOCATION[storage_name], updated_data)
+            save_json(STORAGES_LOCATION[storage_name], storage_data)
         except Exception as e:
             print(e)
 
