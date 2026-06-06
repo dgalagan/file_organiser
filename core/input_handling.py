@@ -1,5 +1,5 @@
 from cli.renderer import render_cli_object, render_cli_grouped_object
-from core.df_processor import DfProcessor, EmptyDataError
+from core.df_processor import DfProcessor
 from enum import StrEnum, auto
 import os
 from pandas.errors import ParserError
@@ -66,7 +66,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             # Open CSV
             try:
                 df = pd.read_csv(csv_path)
-            except (ValueError, FileNotFoundError, PermissionError, EmptyDataError, ParserError, RuntimeError) as e:
+            except (ValueError, FileNotFoundError, PermissionError, ParserError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
         # Manual Load
@@ -88,7 +88,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                 return None, MenuActions.INTERUPT
             try:
                 df = pd.DataFrame(input_dirs)
-            except (TypeError, EmptyDataError) as e:
+            except TypeError as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
                 continue
         # Invalid Input

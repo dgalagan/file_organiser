@@ -1,10 +1,9 @@
+from configs.env_cfg import TARGET_DIR
 from configs.storage_cfg import EXIF_STORAGE_NAME, HASH_STORAGE_NAME
 from configs.ref_cfg import EXTENSION_MAPPING_NAME
 from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, fill_missing_values, assemble_target_path
 import pandas as pd
 from utils.path import is_not_dir, get_normalized_path, get_dir_depth, get_branch_depth
-
-TARGET_DIR = "D:\\MyOrganizedFiles\\"
 
 COLUMNS_ALIASES = {
     EXIF_STORAGE_NAME: {
@@ -34,6 +33,8 @@ COLUMN_TAGS = {
 }
 
 path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExtension", "CountWorksheets", "FileName"]
+report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
+report_name = "migration_report"
 
 PIPELINE = {
     "user_dirs": [
@@ -59,6 +60,8 @@ PIPELINE = {
     "target_path": [
         {"op": "transform",   "func": (fill_missing_values("Other"), "col"),                                       "use_cols": "Category"},
         {"op": "compute",     "func": (assemble_target_path(TARGET_DIR), "row"), "calc_col": "TargetPath",         "use_cols": path_components},
+        {"op": "filter_cols", "cols": report_cols},
+        {"op": "save",        "file_components": {"dir": TARGET_DIR, "name": report_name, "extension": "csv", "encoding": "utf-8-sig"}},
     ]
 }
 # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])

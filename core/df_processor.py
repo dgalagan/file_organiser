@@ -1,5 +1,6 @@
 import pandas as pd
 import operator
+import os
 
 # To improve:
 # incorporate schema validation
@@ -12,15 +13,31 @@ OPERATORS = {
     "!=": operator.ne
 }
 
-class EmptyDataError(Exception):
-    pass
+class DfWriter:
+    """Handles all export and persistence operations for DataFrames."""
+
+    @staticmethod
+    def write(df: pd.DataFrame, extension: str, filepath: str, **kwargs) -> None:
+        
+        if not filepath:
+            raise ValueError("A filepath must be defined.")
+        
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        if extension == "csv":
+            df.to_csv(filepath, **kwargs)
+        elif extension == "excel":
+            df.to_excel(filepath, **kwargs)
+        else:
+            raise NotImplementedError(f"Unsupported export format: {format}")
+
+        print(f"DF successfully saved to {filepath}")
 
 class DfProcessor:
     def __init__(self, df: pd.DataFrame = pd.DataFrame()):
         self.df = df
         self.history = {}
         self.cols_filter = []
-        # self.rows_filter = None
         self.rows_filter = pd.Series(True, index=df.index)
 
     @property
@@ -65,7 +82,6 @@ class DfProcessor:
         # 2. Execute based on mode
         subset = self.df.loc[rows, cols]
         result = self._apply_func(subset, func, func_mode)
-        print(f"Subset shape is {subset.shape} and type {type(subset).__name__}, Result shape is {result.shape} and type {type(result).__name__}")
 
         # 3. Assign result
         if isinstance(result, pd.DataFrame):
@@ -98,7 +114,6 @@ class DfProcessor:
         # 3. Execute based on mode
         subset = self.df.loc[rows, cols]
         result = self._apply_func(subset, func, func_mode)
-        print(f"Subset shape is {subset.shape} and type {type(subset).__name__}, Result shape is {result.shape} and type {type(result).__name__}")
 
         # 4.1 Force columns to object so they can accept ANY type from function
         self.df[cols] = self.df[cols].astype(object)
@@ -215,9 +230,21 @@ class DfProcessor:
                 use_cols = step.get("use_cols")
                 use_keywords = step.get("use_keywords")
                 self.transform(func, func_mode=mode, use_cols=use_cols, use_keywords=use_keywords)
-            # elif op == "filter_rows":
-            #     self.filter_rows(condition=step.get("cond"))
             elif op == "filter_rows":
                 condition = step.get("cond")
                 self.filter_rows(cond=condition)
+            elif op == "filter_cols":
+                cols = step.get("cols", None)
+                keywords = step.get("keywords", None)
+                self.filter_cols(names=cols, keywords=keywords)
+            elif op == "save":
+                components = step.get("file_components", {})
+                dst_dir = components.pop("dir")
+                name = components.pop("name")
+                ext = components.pop("extension")
+                full_name = name + '.' + ext
+                path = os.path.join(dst_dir, full_name)
+                DfWriter.write(df=self.active_selection, extension=ext, filepath=path, **components)
+            else:
+                raise NotImplementedError("DF operation not implemented")
         return self

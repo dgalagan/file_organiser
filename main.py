@@ -1,4 +1,5 @@
 from configs.cli_cfg import cli_objects, cli_grouped_objects
+from configs.env_cfg import TARGET_DIR
 from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.extraction_cfg import EXTRACTION_CFG
@@ -16,9 +17,7 @@ from utils.json import init_json, load_json, save_json, reset_json
 from utils.path import is_file
 
 # manage lowercase path cases in manual input
-TARGET_DIR = "D:\\MyOrganizedFiles\\"
-SAVE_REPORT = True
-final_report = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
+# final_report = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
 
 def main():
     
@@ -143,10 +142,6 @@ def main():
     refdata_df = refdata_dfs["extension_mapping.json"]
     enriched_df = pd.merge(full_metadata, refdata_df[["Category"]], how="left", left_on="FileExtension", right_index=True)
     target_path_df = DfProcessor(enriched_df).run_pipeline(PIPELINE["target_path"]).df
-
-    if SAVE_REPORT:
-        report_path = TARGET_DIR + os.sep + "report.csv"
-        target_path_df[final_report].to_csv(report_path, encoding="utf-8-sig")
 
     #########     CHECK DISK SPACE    #########
     
