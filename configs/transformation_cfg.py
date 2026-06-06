@@ -28,7 +28,7 @@ COLUMNS_ALIASES = {
 }
 
 COLUMN_TAGS = {
-    "created_dt": ["createdate", "creationdate", "datetimeoriginal", "datetimedigitized"],
+    "created_dt": ["createdate", "creationdate", "datetimeoriginal", "datetimedigitized", ], # "exe:timestamp", "xmp:timestamp", "png:exifdatetime", "composite:gpsdatetime", "quicktime:purchasedate", "createddatetime", "datetimecreated", "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
     "access_dt": ["accessdate", "lastplayed", "lastprinted"],
     "modify_dt": ["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]
 }
@@ -37,28 +37,28 @@ path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExt
 
 PIPELINE = {
     "user_dirs": [
-        {"op": "transform",    "func": (get_normalized_path, "element"),                                           "use_cols": "DirPath"},
-        {"op": "compute",      "func": (is_not_dir, "element"),                  "calc_col": "isInvalid",          "use_cols": "DirPath"},
-        {"op": "compute",      "func": (pd.Series.duplicated, "col"),            "calc_col": "isDuplicate",        "use_cols": "DirPath"},
-        {"op": "filter_rows",  "cond": {"col": "isInvalid",   "comparator": "==", "val": False, "mask_junc": "AND"}},
-        {"op": "filter_rows",  "cond": {"col": "isDuplicate", "comparator": "==", "val": False, "mask_junc": "AND"}},
-        {"op": "compute",      "func": (get_dir_depth, "element"),               "calc_col": "DirDepth",           "use_cols": "DirPath"},
-        {"op": "compute",      "func": (get_branch_depth, "element"),            "calc_col": "BranchDepth",        "use_cols": "DirPath"},
-        {"op": "compute",      "func": (lambda r: r.iloc[0] - r.iloc[1], "row"), "calc_col": "BranchDepthFromDir", "use_cols": ["BranchDepth", "DirDepth"]},
+        {"op": "transform",   "func": (get_normalized_path, "element"),                                           "use_cols": "DirPath"},
+        {"op": "compute",     "func": (is_not_dir, "element"),                  "calc_col": "isInvalid",          "use_cols": "DirPath"},
+        {"op": "compute",     "func": (pd.Series.duplicated, "col"),            "calc_col": "isDuplicate",        "use_cols": "DirPath"},
+        {"op": "filter_rows", "cond": {"col": "isInvalid",   "comparator": "==", "val": False, "mask_junc": "AND"}},
+        {"op": "filter_rows", "cond": {"col": "isDuplicate", "comparator": "==", "val": False, "mask_junc": "AND"}},
+        {"op": "compute",     "func": (get_dir_depth, "element"),               "calc_col": "DirDepth",           "use_cols": "DirPath"},
+        {"op": "compute",     "func": (get_branch_depth, "element"),            "calc_col": "BranchDepth",        "use_cols": "DirPath"},
+        {"op": "compute",     "func": (lambda r: r.iloc[0] - r.iloc[1], "row"), "calc_col": "BranchDepthFromDir", "use_cols": ["BranchDepth", "DirDepth"]},
     ],
     EXIF_STORAGE_NAME: [
-        {"op": "transform",    "func": (DateParser().parse, "element"),                                            "use_keywords": COLUMN_TAGS["created_dt"]},
-        {"op": "compute",      "func": (pd.Series.min, "row"),                    "calc_col": "AggTimestamp",      "use_keywords": COLUMN_TAGS["created_dt"]},
-        {"op": "compute",      "func": (get_year, "element"),                     "calc_col": "Year",              "use_cols": "AggTimestamp"},
-        {"op": "compute",      "func": (get_worksheets_count, "element"),         "calc_col": "CountWorksheets",   "use_cols": "DocumentStructure"},
+        {"op": "transform",   "func": (DateParser().parse, "element"),                                            "use_keywords": COLUMN_TAGS["created_dt"]},
+        {"op": "compute",     "func": (pd.Series.min, "row"),                    "calc_col": "AggTimestamp",      "use_keywords": COLUMN_TAGS["created_dt"]},
+        {"op": "compute",     "func": (get_year, "element"),                     "calc_col": "Year",              "use_cols": "AggTimestamp"},
+        {"op": "compute",     "func": (get_worksheets_count, "element"),         "calc_col": "CountWorksheets",   "use_cols": "DocumentStructure"},
     ],
     HASH_STORAGE_NAME: [
-        {"op": "compute",      "func": (pd.Series.duplicated, "col"),             "calc_col": "IsDuplicate",       "use_cols": "Hash"},
-        {"op": "compute",      "func": (label_duplicate, "element"),              "calc_col": "DuplicateLabel",    "use_cols": "IsDuplicate"},
+        {"op": "compute",     "func": (pd.Series.duplicated, "col"),             "calc_col": "IsDuplicate",       "use_cols": "Hash"},
+        {"op": "compute",     "func": (label_duplicate, "element"),              "calc_col": "DuplicateLabel",    "use_cols": "IsDuplicate"},
     ],
     "target_path": [
-        {"op": "transform",    "func": (fill_missing_values("Other"), "col"),                                      "use_cols": "Category"},
-        {"op": "compute",      "func": (assemble_target_path(TARGET_DIR), "row"), "calc_col": "TargetPath",         "use_cols": path_components},
+        {"op": "transform",   "func": (fill_missing_values("Other"), "col"),                                       "use_cols": "Category"},
+        {"op": "compute",     "func": (assemble_target_path(TARGET_DIR), "row"), "calc_col": "TargetPath",         "use_cols": path_components},
     ]
 }
 # .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])

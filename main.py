@@ -18,25 +18,6 @@ from utils.path import is_file
 # manage lowercase path cases in manual input
 TARGET_DIR = "D:\\MyOrganizedFiles\\"
 SAVE_REPORT = True
-created_dt_tags = [
-    # "exe:timestamp", # specific, actually holds date
-    # "xmp:timestamp", # specific, actually holds date
-    # "png:exifdatetime", # specific, actually holds date
-    # "composite:gpsdatetime", # specific, actually holds date
-    # "quicktime:purchasedate", # temporary, overlap with recognised receipt json 
-    "createdate", # 18 instances
-    "creationdate", # 7 instances
-    "datetimeoriginal", # 8 instances
-    "datetimedigitized", # 3 instances
-    # "createddatetime", # 1 instance
-    # "datetimecreated", # 1 instance
-    # "encodingtime", # 2 instances
-    # "profiledatetime", # 1 instance
-    # "retaildate", # 2 instance
-    # "ripdate", # 2 instance
-    # "releasetime", # 2 instance
-    # "originalreleaseyear", # 1 instance
-]
 final_report = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
 
 def main():
@@ -48,6 +29,7 @@ def main():
         return 1
     
     #########       USER INPUT       #########
+    
     try:
         input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
         dirs, files = get_scope(input_dirs)
@@ -55,6 +37,7 @@ def main():
         print(e)
 
     #########      LOAD STORAGE      #########
+    
     # Load storages
     storages = {}
     for storage_name, storage_path in STORAGES_LOCATION.items():
@@ -81,12 +64,10 @@ def main():
     #########      EXTRACT DATA      #########
     
     # Initialize runtime data containers
-    runtime_data = {storage_name: {} for storage_name in STORAGES_LOCATION}
+    processing_queue = {storage_name: [] for storage_name in storages}
+    runtime_data = {storage_name: {} for storage_name in storages}
     runtime_size = {}
     runtime_mtime = {}
-
-    # Initialize processing queue container
-    processing_queue = {storage_name: [] for storage_name in storages}
 
     # Prepare processing queues
     tqdm_desc = "Prepare processing queue:"
@@ -135,6 +116,7 @@ def main():
             print(e)
 
     #########     TRANSFORM DATA     #########
+    
     # Load ref data into df
     refdata_dfs = {}
     for ref_name, ref_path in REFS_LOCATION.items():
@@ -187,6 +169,6 @@ def main():
     #     shutil.copy2(source, destination)
     
     return 0
-    
+
 if __name__ == "__main__":
     sys.exit(main())
