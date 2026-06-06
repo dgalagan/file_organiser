@@ -1,4 +1,4 @@
-from cli.assets import Delimiter, Emoji,Template
+from cli.assets import Icon, Delimiter, Emoji, Template
 
 cli_objects = {  
     "header": {
@@ -9,11 +9,11 @@ cli_objects = {
             "msg": "empty"
         },
         "elements":{
-            "setup_env": {"sep": Delimiter.DASH.repeat(30), "msg": "Setup Env", "width": 20},
-            "main": {"sep": Delimiter.DASH.repeat(30), "msg": "Input Methods", "width": 20},
-            "csv_load": {"sep": Delimiter.DASH.repeat(30), "msg": "CSV load", "width": 20},
-            "manual_load": {"sep": Delimiter.DASH.repeat(30), "msg": "Manual load", "width": 20},
-            "depth": {"sep": Delimiter.DASH.repeat(30), "msg": "Depth", "width": 20}
+            "setup_env": {"sep": Delimiter.DASH.repeat(40), "msg": "Setup Env", "width": 20},
+            "main": {"sep": Delimiter.DASH.repeat(40), "msg": "Input Methods", "width": 20},
+            "csv_load": {"sep": Delimiter.DASH.repeat(40), "msg": "CSV load", "width": 20},
+            "manual_load": {"sep": Delimiter.DASH.repeat(40), "msg": "Manual load", "width": 20},
+            "depth": {"sep": Delimiter.DASH.repeat(40), "msg": "Depth", "width": 20}
         }
     },
     "menu_line": {
@@ -77,13 +77,26 @@ cli_objects = {
         "elements": {
             "exit": {"msg": "Script terminated"},
             "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {dir_path}"},
-            "added": {"msg": "[Added] -----> {dir_paths_count} dirs"},
-            "skipped": {"msg": "[Skipped] -----> as already in scope"},
-            "selected":{"icon": Emoji.BULLSEYE, "sep": Delimiter.SPACE.repeat(1), "msg": "[Selected] -----> {dir_paths_count} dirs"},
+            # "added": {"msg": "[Added] -----> {dir_paths_count} dirs"},
+            "skipped": {"msg": "[Skipped]    -----> already in scope"},
+            "selected":{"icon": Emoji.BULLSEYE, "sep": Delimiter.SPACE.repeat(1), "msg": "[Selected]   -----> {dir_paths_count} dirs"},
             "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Files aquisition completed"},
         }
     },
+    "divider": {
+        "template": Template.SEP,
+        "defaults": {
+            "sep": Delimiter.DASH.repeat(100)
+        }
+    },
+    "flow_marker": {
+        "template": Template.ICON,
+        "defaults": {
+            "icon": Icon.DOWNARROW.repeat(3)
+        }
+    }
 }
+
 cli_grouped_objects = {
     "main_menu": [
         ("header", "main"),

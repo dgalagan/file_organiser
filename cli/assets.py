@@ -1,6 +1,8 @@
 class Template:
     SEP_MSG_SEP = "{start}{sep}{msg:^{width}}{sep}"
     ICON_SEP_MSG = "{start}{icon}{sep}{msg}"
+    SEP = "{sep}"
+    ICON = "{icon}"
 
 class Token:
     def __init__(self, token: str):

@@ -1,4 +1,3 @@
-from cli.assets import Delimiter, Icon
 from cli.renderer import render_cli_object, render_cli_grouped_object
 from core.df_processor import DfProcessor, EmptyDataError
 from enum import StrEnum, auto
@@ -6,6 +5,7 @@ import os
 from pandas.errors import ParserError
 import pandas as pd
 import sys
+from tqdm import tqdm
 from utils.path import is_parent, iter_dir_hierarchy
 from utils.text import lowercase_text, strip_text
 from configs.transformation_cfg import PIPELINE
@@ -14,7 +14,6 @@ from configs.transformation_cfg import PIPELINE
 # instead of os.walk(), create recursion based on os.scandir()
 # self-reporting improvement
 # review error handling
-# clean up cli objects
 
 # Actions
 class MenuActions(StrEnum):
@@ -37,7 +36,7 @@ def get_user_dirs(cli_grouped_objects: dict, cli_objects: dict): # 1st level
             input_option = lowercase_text(strip_text(input_option))
         except KeyboardInterrupt:
             print()
-            print(Icon.DOWNARROW.repeat(3))
+            print(render_cli_object(cli_objects["flow_marker"]))
             print(render_cli_object(cli_objects["info"], "exit"))
             sys.exit(0)
         # User input handling
@@ -49,7 +48,7 @@ def get_user_dirs(cli_grouped_objects: dict, cli_objects: dict): # 1st level
             case MenuActions.FAILED:
                 continue
             case MenuActions.SUCCESS:
-                print(Delimiter.DASH.repeat(80))
+                print(render_cli_object(cli_objects["divider"]))
                 return selected_dirs
 
 def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str): # 2nd level
@@ -106,9 +105,9 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             dir_depth = row["DirDepth"]
             branch_depth_from_dir = row["BranchDepthFromDir"]
             # CLI element
-            print(Delimiter.DASH.repeat(80))
+            print(render_cli_object(cli_objects["divider"]))
             print(render_cli_object(cli_objects["info"], "processing", dir_path=dir_path))
-            print(Icon.DOWNARROW.repeat(3))
+            print(render_cli_object(cli_objects["flow_marker"]))
             # Check if parents exist across processed dirs
             parents = [processed_dir for processed_dir in processed_dirs if is_parent(processed_dir, dir_path)]
             # Check if parent cover scope of dir in processig
@@ -145,7 +144,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             print(render_cli_object(cli_objects["warning"], "empty_input"))
             continue
         
-        print(Delimiter.DASH.repeat(80))
+        print(render_cli_object(cli_objects["divider"]))
         print(render_cli_object(cli_objects["info"], "selected", dir_paths_count=len(selected_dirs)))
 
         return selected_dirs, MenuActions.SUCCESS
@@ -178,13 +177,18 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_d
             except ValueError:
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
 
-def get_scope(input_dirs: list[str]):
+def collect_files_to_organise(input_dirs: list[str], cli_objects: dict = None):
     dirs = set()
     files = set()
-    for input_dir, max_depth in input_dirs:
-        print(f"Exrtacting files from '{input_dir}'")
-        dirs_counter = 0
-        files_counter = 0
+    tqdm_desc = "Extracting files from input dirs:"
+    divider = ""
+    flow_marker = ""
+    if cli_objects is not None:
+        divider = render_cli_object(cli_objects["divider"])
+        flow_marker = render_cli_object(cli_objects["flow_marker"])
+    dirs_counter = 0
+    files_counter = 0
+    for input_dir, max_depth in tqdm(input_dirs, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
         for depth, dir, filenames in iter_dir_hierarchy(input_dir, max_depth):
             dirs.add(dir)
             dirs_counter += 1
@@ -192,7 +196,7 @@ def get_scope(input_dirs: list[str]):
                 file_path = os.path.join(dir, filename)
                 files.add(file_path)
                 files_counter += 1
-        print(f"↓↓↓")
-        print(f"{dirs_counter} dirs scanned, {files_counter} files extracted")
-        print(f"--------------------------------------------------------------------------------")
+    print(flow_marker)
+    print(f"{dirs_counter} dirs scanned, {files_counter} files extracted")
+    print(divider)
     return dirs, files

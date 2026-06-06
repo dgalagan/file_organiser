@@ -1,4 +1,3 @@
-from cli.assets import Icon
 from cli.renderer import render_cli_object
 from configs.cli_cfg import cli_objects
 import os
@@ -12,7 +11,7 @@ def setup_environment(path: str) -> bool:
             return True
         except Exception as e:
             print(f"Error creating directory: {e}")
-            print(Icon.DOWNARROW.repeat(3))
+            print(render_cli_object(cli_objects["flow_marker"]))
             print(render_cli_object(cli_objects["info"], "exit"))
             return False
 
@@ -27,13 +26,13 @@ def setup_environment(path: str) -> bool:
         permission = input(render_cli_object(cli_objects["prompt"], element_name="setup_env", target_path=path))
         if permission == "y":
             success = clean_dir(path)
-            print(Icon.DOWNARROW.repeat(3))
+            print(render_cli_object(cli_objects["flow_marker"]))
             print("Done" if success else "Failed")
             return success
         elif permission == "n":
-            print(Icon.DOWNARROW.repeat(3))
+            print(render_cli_object(cli_objects["flow_marker"]))
             print("Cancelled")
-            print(Icon.DOWNARROW.repeat(3))
+            print(render_cli_object(cli_objects["flow_marker"]))
             print(render_cli_object(cli_objects["info"], "exit"))
             return False
         else:

@@ -12,9 +12,9 @@ def get_placeholders(text: str) -> set:
 def render_cli_object(cli_object: dict, element_name: str = None, **runtime_args) -> str:
     # Validate CLI object dict
     assert isinstance(cli_object, dict), f"CLI object should be a dictionary, {type(cli_object)} provided instead"
-    assert "template" in cli_object, "Template is missing"
-    assert "defaults" in cli_object, "Defaults is missing"
-    assert "elements" in cli_object, "Elements is missing"
+    # assert "template" in cli_object, "Template is missing"
+    # assert "defaults" in cli_object, "Defaults is missing"
+    # assert "elements" in cli_object, "Elements is missing"
     # Unpack CLI assets
     template = cli_object.get("template", {})
     elements = cli_object.get("elements", {})

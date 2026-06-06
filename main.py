@@ -4,7 +4,7 @@ from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from core.env_setup import setup_environment
-from core.input_handling import get_user_dirs, get_scope
+from core.input_handling import get_user_dirs, collect_files_to_organise
 from core.df_processor import DfProcessor
 import os
 import pandas as pd
@@ -32,7 +32,7 @@ def main():
     
     try:
         input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
-        dirs, files = get_scope(input_dirs)
+        dirs, files_to_organise = collect_files_to_organise(input_dirs, cli_objects=cli_objects)
     except Exception as e:
         print(e)
 
@@ -71,7 +71,7 @@ def main():
 
     # Prepare processing queues
     tqdm_desc = "Prepare processing queue:"
-    for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+    for file in tqdm(files_to_organise, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
         # Get current mtime and size
         runtime_size[file] = os.path.getsize(file)
         runtime_mtime[file] = os.path.getmtime(file)  
