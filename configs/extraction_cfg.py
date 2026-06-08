@@ -3,7 +3,6 @@ from configs.hash_cfg import HASH_CFG
 from configs.storage_cfg import EXIF_STORAGE_NAME, HASH_STORAGE_NAME
 from core.extraction import extract_exif_data, extract_hash_data
 
-#########       DATA       #########
 EXTRACTION_CFG = {
     EXIF_STORAGE_NAME: {
         "cfg": EXIF_CFG,
