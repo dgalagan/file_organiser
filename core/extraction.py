@@ -4,6 +4,9 @@ import json
 import os
 from tqdm import tqdm
 
+def get_batches(files: list[str], batch_size: int) -> list[list[str]]:
+    return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
+
 def extract_exif_data(files: list[str], config: dict):
     
     if not isinstance(config, dict):
@@ -40,19 +43,6 @@ def extract_exif_data(files: list[str], config: dict):
                     print("Unsupported output from exif")
                     yield file, file_result
 
-def extract_hash_data(files: list[str], config: dict):
-
-    if not isinstance(config, dict):
-        raise TypeError(f"Unsupported config type - {type(config)}")
-
-    tqdm_desc = "Extract hash data:"
-    for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
-        file_hash = calc_file_hash(file, **config)
-        yield file, file_hash
-
-def get_batches(files: list[str], batch_size: int) -> list[list[str]]:
-    return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
-
 def calc_file_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> dict:
     hash_func = getattr(hashlib, hash_algo)
     file_size = os.path.getsize(path)
@@ -69,3 +59,13 @@ def calc_file_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> dict
         return {"hash": combined_hash.hexdigest()}
     except PermissionError:
         return {}
+    
+def extract_hash_data(files: list[str], config: dict):
+
+    if not isinstance(config, dict):
+        raise TypeError(f"Unsupported config type - {type(config)}")
+
+    tqdm_desc = "Extract hash data:"
+    for file in tqdm(files, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+        file_hash = calc_file_hash(file, **config)
+        yield file, file_hash
