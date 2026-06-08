@@ -13,27 +13,8 @@ OPERATORS = {
     "!=": operator.ne
 }
 
-class DfWriter:
-    """Handles all export and persistence operations for DataFrames."""
-
-    @staticmethod
-    def write(df: pd.DataFrame, extension: str, filepath: str, **kwargs) -> None:
-        
-        if not filepath:
-            raise ValueError("A filepath must be defined.")
-        
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        
-        if extension == "csv":
-            df.to_csv(filepath, **kwargs)
-        elif extension == "excel":
-            df.to_excel(filepath, **kwargs)
-        else:
-            raise NotImplementedError(f"Unsupported export format: {format}")
-
-        print(f"DF successfully saved to {filepath}")
-
 class DfProcessor:
+    
     def __init__(self, df: pd.DataFrame = pd.DataFrame()):
         self.df = df
         self.history = {}
@@ -248,3 +229,23 @@ class DfProcessor:
             else:
                 raise NotImplementedError("DF operation not implemented")
         return self
+
+class DfWriter:
+    """Handles all export and persistence operations for DataFrames."""
+
+    @staticmethod
+    def write(df: pd.DataFrame, extension: str, filepath: str, **kwargs) -> None:
+        
+        if not filepath:
+            raise ValueError("A filepath must be defined.")
+        
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        if extension == "csv":
+            df.to_csv(filepath, **kwargs)
+        elif extension == "excel":
+            df.to_excel(filepath, **kwargs)
+        else:
+            raise NotImplementedError(f"Unsupported export format: {format}")
+
+        print(f"DF successfully saved to {filepath}")

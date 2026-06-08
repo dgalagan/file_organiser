@@ -70,7 +70,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             except (ValueError, FileNotFoundError, PermissionError, ParserError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
-        # Manual Load
+        # MANUAL Load
         elif input_option == "manual":
             # Render menu
             print(render_cli_grouped_object(cli_grouped_objects["manual_menu"], cli_objects))
@@ -96,34 +96,29 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
         else:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
+        
         # Get data
-        dir_data = DfProcessor(df).run_pipeline(PIPELINE["user_dirs"]).active_selection.sort_values("DirDepth", ascending=True)
+        dir_data = DfProcessor(df).run_pipeline(PIPELINE["user_dirs"]).active_selection.sort_values("DirDepth", ascending=True).reset_index()
+
         # Resolve parent-child relationship clash
         reload = False
-        processed_dirs = []
-        for idx, row in dir_data.iterrows():
-            dir_path = row["DirPath"]
-            dir_depth = row["DirDepth"]
-            branch_depth_from_dir = row["BranchDepthFromDir"]
+        selected_dirs = []
+        skip_ids = []
+        while True:
+            pending_dir_ids = dir_data.index[~dir_data.index.isin(skip_ids)]
+            if pending_dir_ids.empty:
+                break
+            dir_id = pending_dir_ids[0]
+            dir_path = dir_data["DirPath"].iloc[dir_id]
+            dir_depth = dir_data["DirDepth"].iloc[dir_id]
+            branch_depth_from_dir = dir_data["BranchDepthFromDir"].iloc[dir_id]
             # CLI element
             print(render_cli_object(cli_objects["divider"]))
             print(render_cli_object(cli_objects["info"], "processing", dir_path=dir_path))
             print(render_cli_object(cli_objects["flow_marker"]))
-            # Check if parents exist across processed dirs
-            parents = [processed_dir for processed_dir in processed_dirs if is_parent(processed_dir, dir_path)]
-            # Check if parent cover scope of dir in processig
-            scope_overlap = False
-            for parent in parents:
-                defined_depth = dir_data.loc[dir_data["DirPath"]==parent, "ProcessingDepth"].item()
-                if dir_depth <= defined_depth:
-                    scope_overlap = True
-                    break
-            if scope_overlap:
-                # hierarchy resolution, ask whether child should be processed separately, delete all related path from parent search, add new
-                print(render_cli_object(cli_objects["info"], "skipped"))
-                continue
-            # Get user input on depth
+            # Get user input on required processing depth
             depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth_from_dir)
+            dir_processing_depth = dir_depth + depth_input
             match in_action:
                 case MenuActions.SKIP:
                     continue
@@ -133,13 +128,27 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
                     reload = True
                     break
                 case MenuActions.SUCCESS:
-                    dir_data.at[idx, "UserInputDepth"] = depth_input
-                    dir_data.at[idx, "ProcessingDepth"] = dir_depth + depth_input
-                    processed_dirs.append(dir_path)
+                    dir_data.at[dir_id, "UserInputDepth"] = depth_input
+                    dir_data.at[dir_id, "DirProcessingDepth"] = dir_processing_depth
+                    selected_dirs.append((dir_path, dir_processing_depth))
+                    skip_ids.append(dir_id)
+            
+            # Check if child exist next to the
+            if pending_dir_ids.size > 1:
+                for pending_dir_id in pending_dir_ids[1:]:
+                    pending_child = dir_data["DirPath"].iloc[pending_dir_id]
+                    pending_child_depth = dir_data["DirDepth"].iloc[pending_dir_id]
+                    if is_parent(dir_path, pending_child):
+                        if pending_child_depth <= dir_processing_depth:
+                            # CLI element
+                            print(render_cli_object(cli_objects["divider"]))
+                            print(render_cli_object(cli_objects["info"], "skipped", dir_path=pending_child))
+                            skip_ids.append(pending_dir_id)
+            else:
+                break
+
         if reload:
             continue
-        
-        selected_dirs = list(dir_data[["DirPath", "ProcessingDepth"]].dropna().itertuples(index=False, name=None))
         
         if not selected_dirs:
             print(render_cli_object(cli_objects["warning"], "empty_input"))

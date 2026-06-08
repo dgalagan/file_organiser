@@ -77,8 +77,7 @@ cli_objects = {
         "elements": {
             "exit": {"msg": "Script terminated"},
             "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {dir_path}"},
-            # "added": {"msg": "[Added] -----> {dir_paths_count} dirs"},
-            "skipped": {"msg": "[Skipped]    -----> already in scope"},
+            "skipped": {"msg": "[Skipped]    -----> {dir_path}"},
             "selected":{"icon": Emoji.BULLSEYE, "sep": Delimiter.SPACE.repeat(1), "msg": "[Selected]   -----> {dir_paths_count} dirs"},
             "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Files aquisition completed"},
         }
