@@ -3,7 +3,7 @@ from configs.cli_cfg import cli_objects
 import os
 from utils.path import clean_dir
 
-def setup_environment(path: str) -> bool:
+def prepare_target_dir(path: str) -> bool:
     # If path does not exist, create it
     if not os.path.exists(path):
         try:
