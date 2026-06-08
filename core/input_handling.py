@@ -41,7 +41,7 @@ def get_user_dirs(cli_grouped_objects: dict, cli_objects: dict): # 1st level
             print(render_cli_object(cli_objects["info"], "exit"))
             sys.exit(0)
         # User input handling
-        selected_dirs, in_action = input_loop(cli_grouped_objects, cli_objects, input_option)
+        selected_dirs, in_action = load_dirs(cli_grouped_objects, cli_objects, input_option)
         # Loop control parameters check
         match in_action:
             case MenuActions.INTERUPT:
@@ -52,7 +52,7 @@ def get_user_dirs(cli_grouped_objects: dict, cli_objects: dict): # 1st level
                 print(render_cli_object(cli_objects["divider"]))
                 return selected_dirs
 
-def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str): # 2nd level
+def load_dirs(cli_grouped_objects: dict, cli_objects: dict, input_option: str): # 2nd level
     while True:
         # CSV Load
         if input_option == "csv":
@@ -117,7 +117,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
             print(render_cli_object(cli_objects["info"], "processing", dir_path=dir_path))
             print(render_cli_object(cli_objects["flow_marker"]))
             # Get user input on required processing depth
-            depth_input, in_action = depth_loop(cli_grouped_objects, cli_objects, branch_depth_from_dir)
+            depth_input, in_action = set_processing_depth(cli_grouped_objects, cli_objects, branch_depth_from_dir)
             dir_processing_depth = dir_depth + depth_input
             match in_action:
                 case MenuActions.SKIP:
@@ -159,7 +159,7 @@ def input_loop(cli_grouped_objects: dict, cli_objects: dict, input_option: str):
 
         return selected_dirs, MenuActions.SUCCESS
 
-def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_dir: int): # 3rd level
+def set_processing_depth(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_dir: int): # 3rd level
     while True:
         # Render menu
         depth_options = f"0-{branch_depth_from_dir}" if branch_depth_from_dir else "0"
@@ -187,7 +187,7 @@ def depth_loop(cli_grouped_objects: dict, cli_objects: dict, branch_depth_from_d
             except ValueError:
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
 
-def collect_files_to_organise(input_dirs: list[str], cli_objects: dict = None):
+def collect_files_to_organise(input_dirs: list[tuple], cli_objects: dict = None):
     dirs = set()
     files = set()
     tqdm_desc = "Extracting files from input dirs:"
