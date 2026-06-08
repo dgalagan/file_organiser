@@ -4,6 +4,7 @@ from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
+from cli.renderer import render_cli_object
 from core.env_setup import setup_environment
 from core.dir_input import get_user_dirs
 from core.processing_scope import collect_files_to_organise
@@ -72,13 +73,13 @@ def main():
     runtime_size = {}
     runtime_mtime = {}
 
-    # Prepare processing queues
-    tqdm_desc = "Prepare processing queue:"
-    for file in tqdm(files_to_organise, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
-        # Get current mtime and size
-        runtime_size[file] = os.path.getsize(file)
-        runtime_mtime[file] = os.path.getmtime(file)  
-        for storage_name, storage_data in storages.items():
+    # Prepare files processing queues
+    tqdm_desc = "Prepare files processing queue:"
+    for storage_name, storage_data in storages.items():
+        for file in tqdm(files_to_organise, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
+            # Get current mtime and size
+            runtime_size[file] = os.path.getsize(file)
+            runtime_mtime[file] = os.path.getmtime(file)
             # Get cached data
             file_history = storage_data.get(file, {})
             cached_snapshot = file_history.get(EXTRACTION_CFG[storage_name]["cfg_str"], {})
@@ -89,11 +90,11 @@ def main():
             if not file_history or not cached_snapshot or runtime_mtime[file] != cached_mtime or runtime_size[file] != cached_size:
                 processing_queue[storage_name].append(file)
             else:
-                runtime_data[storage_name][file] = cached_data
-        
-    # Log the total number of files that require processing
-    print("\n".join(f"{len(processing_queue[storage_name])} file(s) queued for [{storage_name}] processing" for storage_name in processing_queue))
-    
+                runtime_data[storage_name][file] = cached_data       
+        # Log the total number of files that require processing
+        print(f"{len(processing_queue[storage_name])} file(s) queued for [{storage_name}] processing")
+
+    print(render_cli_object(cli_objects["divider"]))
     # Handle processing queue
     for storage_name, files_to_process in processing_queue.items():
         # Load storage
@@ -117,7 +118,8 @@ def main():
             save_json(STORAGES_LOCATION[storage_name], storage_data)
         except Exception as e:
             print(e)
-
+    
+    print(render_cli_object(cli_objects["divider"]))
     #########     TRANSFORM DATA     #########
     
     # Load ref data into df
