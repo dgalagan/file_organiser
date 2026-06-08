@@ -1,15 +1,15 @@
 from configs.cli_cfg import cli_objects, cli_grouped_objects
-from configs.env_cfg import TARGET_DIR
 from configs.exif_cfg import EXIF_PATH
 from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from cli.renderer import render_cli_object
-from core.env_setup import check_exiftool_path, prepare_target_dir
+from core.env_setup import check_exiftool_path, get_target_dir, prepare_target_dir
 from core.dir_input import get_user_dirs
 from core.processing_scope import collect_files_to_organise
-from core.df_processor import DfProcessor
+from core.df_processor import DfProcessor, DfWriter
+from core.transformation import fill_missing_values, assemble_target_path
 import os
 import pandas as pd
 import sys
@@ -19,6 +19,10 @@ from utils.text import uppercase_text
 from utils.json import init_json, load_json, save_json, reset_json
 from utils.path import is_file
 
+path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExtension", "CountWorksheets", "FileName"]
+report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
+report_name = "migration_report"
+
 def main():
     
     #########        SETUP ENV       #########
@@ -26,10 +30,12 @@ def main():
     if not exif_ready:
         return 1
     
-    target_dir_ready = prepare_target_dir(TARGET_DIR)
+    target_dir = get_target_dir()
+
+    target_dir_ready = prepare_target_dir(target_dir)
     if not target_dir_ready:
         return 1
-    
+
     #########       USER INPUT       #########
     
     try:
@@ -151,13 +157,21 @@ def main():
     # Join refdata
     refdata_df = refdata_dfs["extension_mapping.json"]
     enriched_df = pd.merge(full_metadata, refdata_df[["Category"]], how="left", left_on="FileExtension", right_index=True)
-    target_path_df = DfProcessor(enriched_df).run_pipeline(PIPELINE["target_path"]).df
-
+    df_processor = DfProcessor(enriched_df)
+    (
+        df_processor
+        .transform(fill_missing_values("Other"),   func_mode="col",                        use_cols="Category")
+        .compute(assemble_target_path(target_dir), func_mode="row", calc_col="TargetPath", use_cols=path_components)
+        .filter_cols(names=report_cols)
+    )
+    report_df = df_processor.active_selection
+    report_path = os.path.join(target_dir, "migration_report.csv")
+    DfWriter.write(report_df, extension="csv", filepath=report_path, encoding="utf-8-sig")
     print(render_cli_object(cli_objects["divider"]))
     #########     CHECK DISK SPACE    #########
     
-    files_size = target_path_df["FileSize"].sum()
-    _, _, free = shutil.disk_usage(TARGET_DIR)
+    files_size = report_df["FileSize"].sum()
+    _, _, free = shutil.disk_usage(target_dir)
     if files_size >= free:
         print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
         return 1

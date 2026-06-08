@@ -2,7 +2,8 @@ from configs.cli_cfg import cli_objects
 from configs.env_cfg import PLATFORM_SYS
 from cli.renderer import render_cli_object
 import os
-from utils.path import clean_dir, is_file
+import sys
+from utils.path import clean_dir, is_dir, is_file
 
 def check_exiftool_path(path: str):
     if not is_file(path):
@@ -16,9 +17,37 @@ def check_exiftool_path(path: str):
     
     return True
 
+def get_target_dir():
+    while True:
+        try:
+            target_dir_path = input("Provide directory for organized files: ")
+        except KeyboardInterrupt:
+            print()
+            print(render_cli_object(cli_objects["flow_marker"]))
+            print(render_cli_object(cli_objects["info"], "exit"))
+            sys.exit(0)
+        
+        if os.path.exists(target_dir_path):
+            if is_dir(target_dir_path):
+                break
+            elif is_file(target_dir_path):
+                print(render_cli_object(cli_objects["warning"], "invalid_input"))
+                continue
+            else:
+                print(render_cli_object(cli_objects["warning"], "invalid_input"))
+                continue
+        else:
+            try:
+                os.makedirs(target_dir_path, exist_ok=True)
+                break
+            except Exception as e:
+                print(e)
+                print(render_cli_object(cli_objects["warning"], "invalid_input"))
+                continue
+    
+    return target_dir_path
+
 def prepare_target_dir(path: str) -> bool:
-    # If path does not exist, create it
-    os.makedirs(path, exist_ok=True)
 
     # If directory empty, moving forward
     dir_content = os.listdir(path)
@@ -35,8 +64,6 @@ def prepare_target_dir(path: str) -> bool:
             print("Done" if success else "Failed")
             return success
         elif permission == "n":
-            print(render_cli_object(cli_objects["flow_marker"]))
-            print("Cancelled")
             print(render_cli_object(cli_objects["flow_marker"]))
             print(render_cli_object(cli_objects["info"], "exit"))
             return False
