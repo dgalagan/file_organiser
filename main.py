@@ -1,11 +1,12 @@
 from configs.cli_cfg import cli_objects, cli_grouped_objects
 from configs.env_cfg import TARGET_DIR
+from configs.exif_cfg import EXIF_PATH
 from configs.ref_cfg import REFS_LOCATION
 from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from cli.renderer import render_cli_object
-from core.env_setup import prepare_target_dir
+from core.env_setup import check_exiftool_path, prepare_target_dir
 from core.dir_input import get_user_dirs
 from core.processing_scope import collect_files_to_organise
 from core.df_processor import DfProcessor
@@ -21,9 +22,12 @@ from utils.path import is_file
 def main():
     
     #########        SETUP ENV       #########
+    exif_ready = check_exiftool_path(EXIF_PATH)
+    if not exif_ready:
+        return 1
     
-    is_ready = prepare_target_dir(TARGET_DIR)
-    if not is_ready:
+    target_dir_ready = prepare_target_dir(TARGET_DIR)
+    if not target_dir_ready:
         return 1
     
     #########       USER INPUT       #########

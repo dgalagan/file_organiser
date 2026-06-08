@@ -1,9 +1,9 @@
 import os
+from configs.env_cfg import PROJECT_DIR
 
 # Define storage directory path
-project_dir =  os.getcwd()
 ref_dir = "ref"
-ref_dir_path = os.path.join(project_dir, ref_dir)
+ref_dir_path = os.path.join(PROJECT_DIR, ref_dir)
 
 # Define storage filenames
 EXTENSION_MAPPING_NAME = "extension_mapping.json"

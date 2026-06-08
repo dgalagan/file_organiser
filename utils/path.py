@@ -3,7 +3,6 @@ import os
 import shutil
 import stat
 from typing import Iterable, Iterator
-from tqdm import tqdm
 from utils.text import strip_text, split_text, count_letters, count_char
 
 # General
@@ -56,7 +55,7 @@ def is_system(path: str) -> bool:
         return False
     return bool(attrs & FILE_ATTRIBUTE_SYSTEM)
 
-def is_accessible(path: str):
+def is_accessible(path: str) -> bool:
     try:
         with open(path, "rb", buffering=0) as f:
             f.read(0)
@@ -87,14 +86,12 @@ def get_file_stem(path: str, ext_separator: str = '.') -> str:
     else:
         return ""
 
-def get_file_name(path):
+def get_file_name(path) -> str:
     return os.path.basename(path)
 
 def get_file_stat(path: str) -> dict:
     stat = os.stat(path)
     return {
-        # "UserId": stat.st_uid,
-        # "GroupId": stat.st_gid,
         "Name":get_file_name(path),
         "Ext": get_file_extension(path).replace(".", ""),
         "Size": stat.st_size,
@@ -105,7 +102,6 @@ def get_file_stat(path: str) -> dict:
         "ModifiedAt": stat.st_mtime,
         "CreatedAt": stat.st_birthtime,
     }
-
 
 # Dirs specific
 def is_dir(path:str) -> bool:

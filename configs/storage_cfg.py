@@ -1,9 +1,9 @@
 import os
+from configs.env_cfg import PROJECT_DIR
 
 # Define storage directory path
-project_dir =  os.getcwd()
 storage_dir = "db"
-storage_dir_path = os.path.join(project_dir, storage_dir)
+storage_dir_path = os.path.join(PROJECT_DIR, storage_dir)
 
 # Ensure the storage directory exists
 os.makedirs(storage_dir_path, exist_ok=True)
