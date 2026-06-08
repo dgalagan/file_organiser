@@ -1,12 +1,10 @@
 from cli.renderer import render_cli_object, render_cli_grouped_object
 from core.df_processor import DfProcessor
 from enum import StrEnum, auto
-import os
 from pandas.errors import ParserError
 import pandas as pd
 import sys
-from tqdm import tqdm
-from utils.path import is_parent, iter_dir_hierarchy
+from utils.path import is_parent
 from utils.text import lowercase_text, strip_text
 from configs.transformation_cfg import PIPELINE
 
@@ -186,27 +184,3 @@ def set_processing_depth(cli_grouped_objects: dict, cli_objects: dict, branch_de
                     continue
             except ValueError:
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
-
-def collect_files_to_organise(input_dirs: list[tuple], cli_objects: dict = None):
-    dirs = set()
-    files = set()
-    tqdm_desc = "Extracting files from input dirs:"
-    divider = ""
-    flow_marker = ""
-    if cli_objects is not None:
-        divider = render_cli_object(cli_objects["divider"])
-        flow_marker = render_cli_object(cli_objects["flow_marker"])
-    dirs_counter = 0
-    files_counter = 0
-    for input_dir, max_depth in tqdm(input_dirs, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
-        for depth, dir, filenames in iter_dir_hierarchy(input_dir, max_depth):
-            dirs.add(dir)
-            dirs_counter += 1
-            for filename in filenames:
-                file_path = os.path.join(dir, filename)
-                files.add(file_path)
-                files_counter += 1
-    print(flow_marker)
-    print(f"{dirs_counter} dirs scanned, {files_counter} files extracted")
-    print(divider)
-    return dirs, files

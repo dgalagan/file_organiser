@@ -5,7 +5,8 @@ from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
 from configs.extraction_cfg import EXTRACTION_CFG
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from core.env_setup import setup_environment
-from core.input_handling import get_user_dirs, collect_files_to_organise
+from core.dir_input import get_user_dirs
+from core.processing_scope import collect_files_to_organise
 from core.df_processor import DfProcessor
 import os
 import pandas as pd
@@ -28,6 +29,12 @@ def main():
     
     try:
         input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
+    except Exception as e:
+        print(e)
+
+    #########    PROCESSING SCOPE    #########
+    
+    try:
         dirs, files_to_organise = collect_files_to_organise(input_dirs, cli_objects=cli_objects)
     except Exception as e:
         print(e)
