@@ -79,7 +79,6 @@ cli_objects = {
             "processing": {"icon": Emoji.HOURGLASS, "sep": Delimiter.SPACE, "msg": "[Processing] -----> {dir_path}"},
             "skipped": {"msg": "[Skipped]    -----> {dir_path}"},
             "selected":{"icon": Emoji.BULLSEYE, "sep": Delimiter.SPACE.repeat(1), "msg": "[Selected]   -----> {dir_paths_count} dirs"},
-            "output_ready": {"icon": Emoji.CHEQUEREDFLAG, "msg": "Files aquisition completed"},
         }
     },
     "divider": {

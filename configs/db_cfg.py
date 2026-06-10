@@ -26,5 +26,5 @@ DB_INIT_CFG = {
 }
 DB_RESET_FLAGS = {
     EXIF_DB_NAME: False,
-    HASH_DB_NAME: False
+    HASH_DB_NAME: True
 }

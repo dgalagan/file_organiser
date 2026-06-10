@@ -12,7 +12,6 @@ def load_json(json_path: str):
 def save_json(json_path: str, json_data: dict):
     with open(json_path, "w", encoding=ENCODING) as f:
         json.dump(json_data, f)
-        print(f"{json_path} saved successfully!")
 
 def reset_json(json_path: str):
     json_data = load_json(json_path)

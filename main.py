@@ -3,7 +3,7 @@ from configs.env_cfg import FILE_MANIFEST, FILE_PATHS, EXECUTABLE_MANIFEST, EXEC
 from configs.db_cfg import DB_INIT_CFG, DB_RESET_FLAGS, DB_CALC
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from cli.renderer import render_cli_object
-from core.env_setup import download_tool, get_target_dir, prepare_target_dir
+from core.env_setup import download_tool, get_target_dir
 from core.dir_input import get_user_dirs
 from core.processing_scope import collect_files_to_organise
 from core.df_processor import DfProcessor, DfWriter
@@ -31,21 +31,17 @@ def main():
         db_path = FILE_PATHS.get(db_file, '')
         if not db_path:
             raise RuntimeError(f"No path resolved for {db_file}")
-        
         reset = DB_RESET_FLAGS.get(db_file, False)
         init_cfg = DB_INIT_CFG.get(db_file, {})
-        
         if not is_file(db_path):
             try:
                 init_json(db_path, **init_cfg)
             except (TypeError, IOError) as e:
-                # implement logger
                 raise RuntimeError(f"Failed to init {db_path}") from e
         elif reset:
             try:
                 reset_json(db_path)
             except (TypeError, IOError, PermissionError) as e:
-                # implement logger
                 raise RuntimeError(f"Failed to reset {db_path}") from e
         print(f"✅ {db_file} available")
     
@@ -55,7 +51,6 @@ def main():
         executable_path = EXECUTABLE_PATHS.get(tool, '')
         if not executable_path:
             raise RuntimeError(f"No path resolved for {tool}")
-        
         if not is_file(executable_path):
             url = EXECUTABLE_URLS[tool]
             tool_path = os.path.dirname(executable_path)
@@ -68,14 +63,9 @@ def main():
         print(f"✅ {tool} available")
     
     #########       USER INPUT       #########
-
-    target_dir = get_target_dir()
-
-    target_dir_ready = prepare_target_dir(target_dir)
-    if not target_dir_ready:
-        return 1
-
+    print(render_cli_object(cli_objects["header"], element_name="setup_env"))
     try:
+        target_dir = get_target_dir()
         input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
     except Exception as e:
         print(e)

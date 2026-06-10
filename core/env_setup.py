@@ -32,11 +32,10 @@ def download_tool(url: str, dest_dir: str) -> None:
     else:
         raise RuntimeError(f"Unsupported archive format: {url}")
 
-
 def get_target_dir():
     while True:
         try:
-            target_dir_path = input("Provide directory for organized files: ")
+            target_dir_path = input("➡️  Provide empty directory for organized files: ")
         except KeyboardInterrupt:
             print()
             print(render_cli_object(cli_objects["flow_marker"]))
@@ -45,7 +44,16 @@ def get_target_dir():
         
         if os.path.exists(target_dir_path):
             if is_dir(target_dir_path):
-                break
+                dir_content = os.listdir(target_dir_path)
+                if not dir_content:
+                    break
+                if prepare_target_dir(target_dir_path):
+                    print(render_cli_object(cli_objects["flow_marker"]))
+                    print("Done")
+                    break
+                else:
+                    print(render_cli_object(cli_objects["flow_marker"]))
+                    continue
             elif is_file(target_dir_path):
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
                 continue
@@ -60,28 +68,19 @@ def get_target_dir():
                 print(e)
                 print(render_cli_object(cli_objects["warning"], "invalid_input"))
                 continue
-    
     return target_dir_path
 
 def prepare_target_dir(path: str) -> bool:
-
-    # If directory empty, moving forward
-    dir_content = os.listdir(path)
-    if not dir_content:
-        return True
-    
     # Interact with user in case directory has files
     while True:
-        print(render_cli_object(cli_objects["header"], element_name="setup_env"))
         permission = input(render_cli_object(cli_objects["prompt"], element_name="setup_env", target_path=path))
         if permission == "y":
-            success = clean_dir(path)
-            print(render_cli_object(cli_objects["flow_marker"]))
-            print("Done" if success else "Failed")
-            return success
+            try:
+                clean_dir(path)
+                return True
+            except Exception as e:
+                raise RuntimeError(f"Failed to clean {path}. Reason {e}")
         elif permission == "n":
-            print(render_cli_object(cli_objects["flow_marker"]))
-            print(render_cli_object(cli_objects["info"], "exit"))
             return False
         else:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))

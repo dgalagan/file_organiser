@@ -158,15 +158,9 @@ def remove_readonly(func, path, _):
 
 def clean_dir(path: str):
     dir_content = os.listdir(path)
-    success = True
     for obj_name in dir_content:
         obj_path = os.path.join(path, obj_name)
-        try:
-            if is_file(obj_path):
-                os.remove(obj_path)
-            elif is_dir(obj_path):
-                shutil.rmtree(obj_path, onexc=remove_readonly)
-        except Exception as e:
-            print(f"Failed to delete {obj_path}. Reason {e}")
-            success = False
-    return success
+        if is_file(obj_path):
+            os.remove(obj_path)
+        elif is_dir(obj_path):
+            shutil.rmtree(obj_path, onexc=remove_readonly)
