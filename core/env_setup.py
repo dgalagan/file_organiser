@@ -1,21 +1,37 @@
 from configs.cli_cfg import cli_objects
-from configs.env_cfg import PLATFORM_SYS
 from cli.renderer import render_cli_object
 import os
 import sys
 from utils.path import clean_dir, is_dir, is_file
+import urllib.request
+import io
+import zipfile
+import tarfile
+import shutil
 
-def check_exiftool_path(path: str):
-    if not is_file(path):
-        print(f"❌ ExifTool executable has not been found at: {path}")
-        return False
+
+def download_tool(url: str, dest_dir: str) -> None:
     
-    if PLATFORM_SYS in ("Darwin", "Linux"):
-        if not os.access(path, os.X_OK):
-            print(f"❌ ExifTool found, but it is missing execution permissions. Run 'chmod +x {path}'")
-            return False
+    print(f"Downloading from {url}...")
+    with urllib.request.urlopen(url) as response:
+        data = io.BytesIO(response.read())
+        final_url = response.url
     
-    return True
+    print(f"Extracting {final_url}...")
+    if ".zip" in final_url:
+        with zipfile.ZipFile(data) as z:
+            root = z.namelist()[0].split("/")[0] 
+            z.extractall(dest_dir)
+        nested = os.path.join(dest_dir, root)
+        for item in os.listdir(nested):
+            shutil.move(os.path.join(nested, item), os.path.join(dest_dir, item))
+        os.rmdir(nested)
+    elif ".tar.gz" in final_url or ".tgz" in final_url:
+        with tarfile.open(fileobj=data, mode="r:gz") as t:
+            t.extractall(dest_dir)
+    else:
+        raise RuntimeError(f"Unsupported archive format: {url}")
+
 
 def get_target_dir():
     while True:

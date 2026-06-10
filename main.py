@@ -1,11 +1,9 @@
 from configs.cli_cfg import cli_objects, cli_grouped_objects
-from configs.exif_cfg import EXIF_PATH
-from configs.ref_cfg import REFS_LOCATION
-from configs.storage_cfg import STORAGES_LOCATION, STORAGES_INIT, STORAGES_RESET
-from configs.extraction_cfg import EXTRACTION_CFG
+from configs.env_cfg import FILE_MANIFEST, FILE_PATHS, EXECUTABLE_MANIFEST, EXECUTABLE_PATHS, EXECUTABLE_URLS
+from configs.db_cfg import DB_INIT_CFG, DB_RESET_FLAGS, DB_CALC
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from cli.renderer import render_cli_object
-from core.env_setup import check_exiftool_path, get_target_dir, prepare_target_dir
+from core.env_setup import download_tool, get_target_dir, prepare_target_dir
 from core.dir_input import get_user_dirs
 from core.processing_scope import collect_files_to_organise
 from core.df_processor import DfProcessor, DfWriter
@@ -26,18 +24,57 @@ report_name = "migration_report"
 def main():
     
     #########        SETUP ENV       #########
-    exif_ready = check_exiftool_path(EXIF_PATH)
-    if not exif_ready:
-        return 1
+
+    # Resolve DB dependency
+    db_files = FILE_MANIFEST.get("db", [])
+    for db_file in db_files:
+        db_path = FILE_PATHS.get(db_file, '')
+        if not db_path:
+            raise RuntimeError(f"No path resolved for {db_file}")
+        
+        reset = DB_RESET_FLAGS.get(db_file, False)
+        init_cfg = DB_INIT_CFG.get(db_file, {})
+        
+        if not is_file(db_path):
+            try:
+                init_json(db_path, **init_cfg)
+            except (TypeError, IOError) as e:
+                # implement logger
+                raise RuntimeError(f"Failed to init {db_path}") from e
+        elif reset:
+            try:
+                reset_json(db_path)
+            except (TypeError, IOError, PermissionError) as e:
+                # implement logger
+                raise RuntimeError(f"Failed to reset {db_path}") from e
+        print(f"✅ {db_file} available")
     
+    # Resolve tools dependency
+    tools = EXECUTABLE_MANIFEST.get("bin", [])
+    for tool in tools:
+        executable_path = EXECUTABLE_PATHS.get(tool, '')
+        if not executable_path:
+            raise RuntimeError(f"No path resolved for {tool}")
+        
+        if not is_file(executable_path):
+            url = EXECUTABLE_URLS[tool]
+            tool_path = os.path.dirname(executable_path)
+            if not url:
+                raise RuntimeError(f"{tool} not found and no download URL configured")
+            try:
+                download_tool(url, tool_path)
+            except:
+                raise RuntimeError(f"Failed to download {tool}") from e
+        print(f"✅ {tool} available")
+    
+    #########       USER INPUT       #########
+
     target_dir = get_target_dir()
 
     target_dir_ready = prepare_target_dir(target_dir)
     if not target_dir_ready:
         return 1
 
-    #########       USER INPUT       #########
-    
     try:
         input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
     except Exception as e:
@@ -50,96 +87,79 @@ def main():
     except Exception as e:
         print(e)
 
-    #########      LOAD STORAGE      #########
-    
-    # Load storages
-    storages = {}
-    for storage_name, storage_path in STORAGES_LOCATION.items():
-        # Initialize storage file
-        if not is_file(storage_path):
-            try:
-                init_cfg = STORAGES_INIT[storage_name]
-                init_json(storage_path, **init_cfg)
-            except Exception as e:
-                print(e)
-        # Reset the storage file if requested
-        if STORAGES_RESET[storage_name]:
-            try:
-                reset_json(storage_path)
-            except Exception as e:
-                print(e)
-        # Load storage data
-        try:
-            storage_data = load_json(storage_path)
-            storages[storage_name] = storage_data
-        except Exception as e:
-            print(e)
-
     #########      EXTRACT DATA      #########
     
     # Initialize runtime data containers
-    processing_queue = {storage_name: [] for storage_name in storages}
-    runtime_data = {storage_name: {} for storage_name in storages}
+    processing_queue = {db_file: [] for db_file in db_files}
+    runtime_data = {db_file: {} for db_file in db_files}
     runtime_size = {}
     runtime_mtime = {}
 
     # Prepare files processing queues
     tqdm_desc = "Prepare files processing queue:"
-    for storage_name, storage_data in storages.items():
+    for db_file in db_files:
+        try:
+            db_data = load_json(FILE_PATHS[db_file])
+        except (FileNotFoundError, IOError, PermissionError) as e:
+            raise RuntimeError(f"Failed to load {db_file}") from e
         for file in tqdm(files_to_organise, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
             # Get current mtime and size
             runtime_size[file] = os.path.getsize(file)
             runtime_mtime[file] = os.path.getmtime(file)
             # Get cached data
-            file_history = storage_data.get(file, {})
-            cached_snapshot = file_history.get(EXTRACTION_CFG[storage_name]["cfg_str"], {})
+            file_history = db_data.get(file, {})
+            cached_snapshot = file_history.get(DB_CALC[db_file]["cfg_str"], {})
             cached_data = cached_snapshot.get("data")
             cached_mtime = cached_snapshot.get("mtime")
             cached_size = cached_snapshot.get("size")
             # Add file to processing queue or reuse cached data for this runtime
             if not file_history or not cached_snapshot or runtime_mtime[file] != cached_mtime or runtime_size[file] != cached_size:
-                processing_queue[storage_name].append(file)
+                processing_queue[db_file].append(file)
             else:
-                runtime_data[storage_name][file] = cached_data       
+                runtime_data[db_file][file] = cached_data
         # Log the total number of files that require processing
-        print(f"{len(processing_queue[storage_name])} file(s) queued for [{storage_name}] processing")
+        print(f"{len(processing_queue[db_file])} file(s) queued for [{db_file}] processing")
 
     print(render_cli_object(cli_objects["divider"]))
     # Handle processing queue
-    for storage_name, files_to_process in processing_queue.items():
+    for db_file, files_to_process in processing_queue.items():
         # Load storage
-        storage_data = storages.get(storage_name, {})
+        try:
+            db_data = load_json(FILE_PATHS[db_file])
+        except (FileNotFoundError, IOError, PermissionError) as e:
+            raise RuntimeError(f"Failed to load {db_file}") from e
         # Load storage config
-        extraction_cfg = EXTRACTION_CFG.get(storage_name, {})
+        extraction_cfg = DB_CALC.get(db_file, {})
         cfg_str = extraction_cfg.get("cfg_str", '')
         cfg = extraction_cfg.get("cfg", {})
         func = extraction_cfg.get("func")
         if cfg_str and cfg and func is not None:
             for processed_file, data in func(files_to_process, cfg):
                 # Update runtime container
-                runtime_data[storage_name][processed_file] = data
+                runtime_data[db_file][processed_file] = data
                 # Update storage
-                if processed_file not in storage_data:
-                    storage_data[processed_file] = {cfg_str: {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
+                if processed_file not in db_data:
+                    db_data[processed_file] = {cfg_str: {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}}
                 else:
-                    storage_data[processed_file][cfg_str] = {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
+                    db_data[processed_file][cfg_str] = {"data":data, "mtime":runtime_mtime[processed_file], "size":runtime_size[processed_file]}
         # Save updated data
         try:
-            save_json(STORAGES_LOCATION[storage_name], storage_data)
-        except Exception as e:
-            print(e)
+            save_json(FILE_PATHS[db_file], db_data)
+        except (TypeError, IOError, PermissionError) as e:
+            raise RuntimeError(f"Failed to save {db_file}") from e
     
     print(render_cli_object(cli_objects["divider"]))
     #########     TRANSFORM DATA     #########
     
     # Load ref data into df
     refdata_dfs = {}
-    for ref_name, ref_path in REFS_LOCATION.items():
+    ref_files = FILE_MANIFEST.get("ref", [])
+    for ref_file in ref_files:
         try:
-            refdata = load_json(ref_path)
+            refdata = load_json(FILE_PATHS[ref_file])
             refdata_df = pd.DataFrame.from_dict(refdata, orient="index")
-            refdata_df = refdata_df.rename(columns=COLUMNS_ALIASES[ref_name]).rename(uppercase_text, axis="index")
-            refdata_dfs[ref_name] = refdata_df
+            refdata_df = refdata_df.rename(columns=COLUMNS_ALIASES[ref_file]).rename(uppercase_text, axis="index")
+            refdata_dfs[ref_file] = refdata_df
         except Exception as e:
             print(e)
 
@@ -150,21 +170,18 @@ def main():
         metadata_df = metadata_df.rename(columns=COLUMNS_ALIASES[runtime_key])
         metadata_df = DfProcessor(metadata_df).run_pipeline(PIPELINE[runtime_key]).df
         metadata_dfs[runtime_key] = metadata_df
-
-    # Concat metadata dfs
     full_metadata = pd.concat(metadata_dfs.values(), axis=1)
 
     # Join refdata
-    refdata_df = refdata_dfs["extension_mapping.json"]
+    refdata_df = refdata_dfs["extension_ref.json"]
     enriched_df = pd.merge(full_metadata, refdata_df[["Category"]], how="left", left_on="FileExtension", right_index=True)
     df_processor = DfProcessor(enriched_df)
     (
         df_processor
         .transform(fill_missing_values("Other"),   func_mode="col",                        use_cols="Category")
         .compute(assemble_target_path(target_dir), func_mode="row", calc_col="TargetPath", use_cols=path_components)
-        .filter_cols(names=report_cols)
     )
-    report_df = df_processor.active_selection
+    report_df = df_processor.filter_cols(names=report_cols).active_selection
     report_path = os.path.join(target_dir, "migration_report.csv")
     DfWriter.write(report_df, extension="csv", filepath=report_path, encoding="utf-8-sig")
     print(render_cli_object(cli_objects["divider"]))

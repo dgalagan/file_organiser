@@ -1,3 +1,4 @@
+from configs.env_cfg import ENCODING, EXECUTABLE_PATHS
 from exiftool import ExifTool
 import hashlib
 import json
@@ -11,7 +12,7 @@ def extract_exif_data(files: list[str], config: dict):
     
     if not isinstance(config, dict):
         raise TypeError(f"Unsupported config type - {type(config)}")
-
+    
     args = config.get("args", [])
     batch_size = config.get("batch_size", 0)
 
@@ -20,7 +21,7 @@ def extract_exif_data(files: list[str], config: dict):
         batches = get_batches(files, batch_size)
     
     tqdm_desc = "Extract exif data:"
-    with ExifTool(encoding="utf-8") as et:
+    with ExifTool(encoding=ENCODING, executable=EXECUTABLE_PATHS["exif"]) as et:
         if batches is not None:
             for batch in tqdm(batches, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
                 raw_output = et.execute(*args, *batch)
