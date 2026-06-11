@@ -6,7 +6,7 @@ from utils.path import is_not_dir, get_normalized_path, get_dir_depth, get_branc
 COLUMNS_ALIASES = {
     EXIF_DB_NAME: {
         "File:FileName"             : "FileName",
-        "File:FileSize"             : "FileSize", 
+        "File:FileSize"             : "FileSize",
         "File:FileTypeExtension"    : "FileExtension",
         "XML:HeadingPairs"          : "DocumentStructure",
         "EXIF:Model"                : "CameraModel",
@@ -25,9 +25,9 @@ COLUMNS_ALIASES = {
 }
 
 COLUMN_TAGS = {
-    "created_dt": ["createdate", "creationdate", "datetimeoriginal", "datetimedigitized", ], # "exe:timestamp", "xmp:timestamp", "png:exifdatetime", "composite:gpsdatetime", "quicktime:purchasedate", "createddatetime", "datetimecreated", "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
-    "access_dt": ["accessdate", "lastplayed", "lastprinted"],
-    "modify_dt": ["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]
+    "created_dt":   ["createdate", "creationdate", "datetimeoriginal", "datetimedigitized", ], # "exe:timestamp", "xmp:timestamp", "png:exifdatetime", "composite:gpsdatetime", "quicktime:purchasedate", "createddatetime", "datetimecreated", "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
+    "access_dt":    ["accessdate", "lastplayed", "lastprinted"],
+    "modify_dt":    ["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]
 }
 
 PIPELINE = {

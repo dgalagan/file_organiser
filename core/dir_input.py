@@ -1,10 +1,9 @@
 from cli.renderer import render_cli_object, render_cli_grouped_object
 from core.df_processor import DfProcessor
 from enum import StrEnum, auto
-from pandas.errors import ParserError
 import pandas as pd
-import sys
-from utils.path import is_parent
+import os
+from utils.path import is_parent, is_dir, clean_dir, is_file
 from utils.text import lowercase_text, strip_text
 from configs.transformation_cfg import PIPELINE
 
@@ -24,20 +23,74 @@ class MenuActions(StrEnum):
     FAILED = auto()
     RESTART = auto()
 
-## Loops
-def get_user_dirs(cli_grouped_objects: dict, cli_objects: dict): # 1st level
+# Destination directory for categorized files
+def get_dest_dir(cli_objects: dict) -> str:
+    while True:
+        print(render_cli_object(cli_objects["header"], element_name="dest_dir"))
+        try:
+            dest_dir_path = input("➡️  Provide empty directory for organized files: ")
+        except KeyboardInterrupt:
+            print()
+            return ''
+        
+        if os.path.exists(dest_dir_path):
+            if is_dir(dest_dir_path):
+                dir_content = os.listdir(dest_dir_path)
+                if not dir_content:
+                    return dest_dir_path
+                if prepare_dest_dir(dest_dir_path, cli_objects):
+                    return dest_dir_path
+                else:
+                    continue
+            elif is_file(dest_dir_path):
+                print(render_cli_object(cli_objects["warning"], "invalid_input"))
+                continue
+            else:
+                print(render_cli_object(cli_objects["warning"], "invalid_input"))
+                continue
+        else:
+            try:
+                os.makedirs(dest_dir_path, exist_ok=True)
+                return dest_dir_path
+            except Exception as e:
+                print(e)
+                print(render_cli_object(cli_objects["warning"], "invalid_input"))
+                continue
+
+def prepare_dest_dir(path: str, cli_objects: dict) -> bool:
+    # Interact with user in case directory has files
+    while True:
+        try:
+            permission = input(render_cli_object(cli_objects["prompt"], element_name="setup_env", target_path=path))
+        except KeyboardInterrupt:
+            print()
+            return False
+        
+        if permission == "y":
+            try:
+                clean_dir(path)
+                return True
+            except Exception as e:
+                raise RuntimeError(f"Failed to clean {path}. Reason {e}")
+        elif permission == "n":
+            return False
+        else:
+            print(render_cli_object(cli_objects["warning"], "invalid_input"))
+            continue
+
+# Source directories for file processing
+def get_input_dirs(cli_grouped_objects: dict, cli_objects: dict) -> tuple: # 1st level
     while True:
         # Render menu
-        print(render_cli_grouped_object(cli_grouped_objects["main_menu"], cli_objects))
+        print(render_cli_grouped_object(cli_grouped_objects["input_dirs_menu"], cli_objects))
         # Request user input
         try:
             input_option = input(render_cli_object(cli_objects["prompt"]))
             input_option = lowercase_text(strip_text(input_option))
         except KeyboardInterrupt:
             print()
-            print(render_cli_object(cli_objects["flow_marker"]))
-            print(render_cli_object(cli_objects["info"], "exit"))
-            sys.exit(0)
+            return ()
+        
         # User input handling
         selected_dirs, in_action = load_dirs(cli_grouped_objects, cli_objects, input_option)
         # Loop control parameters check
@@ -65,7 +118,7 @@ def load_dirs(cli_grouped_objects: dict, cli_objects: dict, input_option: str): 
             # Open CSV
             try:
                 df = pd.read_csv(csv_path)
-            except (ValueError, FileNotFoundError, PermissionError, ParserError, RuntimeError) as e:
+            except (ValueError, FileNotFoundError, PermissionError, RuntimeError) as e:
                 print(render_cli_object(cli_objects["warning"], "csv_load_failed", error=e))
                 continue
         # MANUAL Load

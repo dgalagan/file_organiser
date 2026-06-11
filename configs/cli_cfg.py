@@ -9,8 +9,8 @@ cli_objects = {
             "msg": "empty"
         },
         "elements":{
-            "setup_env": {"sep": Delimiter.DASH.repeat(40), "msg": "Setup Env", "width": 20},
-            "main": {"sep": Delimiter.DASH.repeat(40), "msg": "Input Methods", "width": 20},
+            "dest_dir": {"sep": Delimiter.DASH.repeat(40), "msg": "Select Dest Dir", "width": 20},
+            "input_dirs": {"sep": Delimiter.DASH.repeat(40), "msg": "Load Input Dirs", "width": 20},
             "csv_load": {"sep": Delimiter.DASH.repeat(40), "msg": "CSV load", "width": 20},
             "manual_load": {"sep": Delimiter.DASH.repeat(40), "msg": "Manual load", "width": 20},
             "depth": {"sep": Delimiter.DASH.repeat(40), "msg": "Depth", "width": 20}
@@ -96,8 +96,8 @@ cli_objects = {
 }
 
 cli_grouped_objects = {
-    "main_menu": [
-        ("header", "main"),
+    "input_dirs_menu": [
+        ("header", "input_dirs"),
         ("menu_line", "exit"),
         ("menu_line", "csv_load"),
         ("menu_line", "manual_load")

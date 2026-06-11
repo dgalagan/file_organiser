@@ -1,13 +1,13 @@
 from configs.cli_cfg import cli_objects, cli_grouped_objects
-from configs.env_cfg import FILE_MANIFEST, FILE_PATHS, EXECUTABLE_MANIFEST, EXECUTABLE_PATHS, EXECUTABLE_URLS
+from configs.env_cfg import FILE_MANIFEST, FILE_PATHS, EXECUTABLE_MANIFEST, EXECUTABLE_PATHS, EXECUTABLE_URLS, ENCODING_CSV
 from configs.db_cfg import DB_INIT_CFG, DB_RESET_FLAGS, DB_CALC
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from cli.renderer import render_cli_object
-from core.env_setup import download_tool, get_target_dir
-from core.dir_input import get_user_dirs
+from core.env_setup import download_tool
+from core.dir_input import get_dest_dir, get_input_dirs
 from core.processing_scope import collect_files_to_organise
 from core.df_processor import DfProcessor, DfWriter
-from core.transformation import fill_missing_values, assemble_target_path
+from core.transformation import fill_missing_values, assemble_dest_path
 import os
 import pandas as pd
 import sys
@@ -58,10 +58,13 @@ def main():
         print(f"✅ {tool} available")
     
     #########       USER INPUT       #########
-    print(render_cli_object(cli_objects["header"], element_name="setup_env"))
     try:
-        target_dir = get_target_dir()
-        input_dirs = get_user_dirs(cli_grouped_objects, cli_objects)
+        dest_dir = get_dest_dir(cli_objects)
+        if not dest_dir:
+            return 1
+        input_dirs = get_input_dirs(cli_grouped_objects, cli_objects)
+        if not input_dirs:
+            return 1
     except Exception as e:
         print(e)
 
@@ -164,16 +167,16 @@ def main():
     (
         df_processor
         .transform(fill_missing_values("Other"),   func_mode="col",                        use_cols="Category")
-        .compute(assemble_target_path(target_dir), func_mode="row", calc_col="TargetPath", use_cols=path_components)
+        .compute(assemble_dest_path(dest_dir), func_mode="row", calc_col="DestPath", use_cols=path_components)
     )
     report_df = df_processor.filter_cols(names=report_cols).active_selection
-    report_path = os.path.join(target_dir, "migration_report.csv")
-    DfWriter.write(report_df, extension="csv", filepath=report_path, encoding="utf-8-sig")
+    report_path = os.path.join(dest_dir, "migration_report.csv")
+    DfWriter.write(report_df, extension="csv", filepath=report_path, encoding=ENCODING_CSV)
     print(render_cli_object(cli_objects["divider"]))
     #########     CHECK DISK SPACE    #########
     
     files_size = report_df["FileSize"].sum()
-    _, _, free = shutil.disk_usage(target_dir)
+    _, _, free = shutil.disk_usage(dest_dir)
     if files_size >= free:
         print(f"Not enough space to move files: free {int(free /(1<<30))} GB, required {int(files_size /(1<<30))} GB")
         return 1
@@ -193,4 +196,8 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    exit_code = main()
+    if exit_code == 1:
+        print(render_cli_object(cli_objects["flow_marker"]))
+        print(render_cli_object(cli_objects["info"], "exit"))
+    sys.exit(exit_code)

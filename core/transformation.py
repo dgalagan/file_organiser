@@ -81,11 +81,11 @@ def fill_missing_values(filler: str):
     
     return fill_column
 
-def assemble_target_path(target_dir: str):
+def assemble_dest_path(dest_dir: str):
     
     def build_path(row: pd.Series) -> pd.Series:
         path_fragments = [str(value) for value in row if pd.notna(value)]
-        return os.path.join(target_dir, *path_fragments)
+        return os.path.join(dest_dir, *path_fragments)
 
     return build_path
 

@@ -6,6 +6,7 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # File settings
 ENCODING = "utf-8"
+ENCODING_CSV = "utf-8-sig"
 
 # JSON settings
 JSON_SETTINGS = {
