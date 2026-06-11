@@ -52,4 +52,3 @@ PIPELINE = {
         {"op": "compute",     "func": (label_duplicate, "element"),              "calc_col": "DuplicateLabel",    "use_cols": "IsDuplicate"},
     ]
 }
-# .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])

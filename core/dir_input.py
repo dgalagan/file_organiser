@@ -7,12 +7,6 @@ from utils.path import is_parent, is_dir, clean_dir, is_file
 from utils.text import lowercase_text, strip_text
 from configs.transformation_cfg import PIPELINE
 
-# To improve:
-# instead of os.walk(), create recursion based on os.scandir()
-# self-reporting improvement
-# review error handling
-# manage lowercase path cases in manual input
-
 # Actions
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -79,10 +73,10 @@ def prepare_dest_dir(path: str, cli_objects: dict) -> bool:
             continue
 
 # Source directories for file processing
-def get_input_dirs(cli_grouped_objects: dict, cli_objects: dict) -> tuple: # 1st level
+def get_src_dirs(cli_grouped_objects: dict, cli_objects: dict) -> tuple: # 1st level
     while True:
         # Render menu
-        print(render_cli_grouped_object(cli_grouped_objects["input_dirs_menu"], cli_objects))
+        print(render_cli_grouped_object(cli_grouped_objects["src_dirs_menu"], cli_objects))
         # Request user input
         try:
             input_option = input(render_cli_object(cli_objects["prompt"]))

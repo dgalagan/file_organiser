@@ -10,7 +10,7 @@ cli_objects = {
         },
         "elements":{
             "dest_dir": {"sep": Delimiter.DASH.repeat(40), "msg": "Select Dest Dir", "width": 20},
-            "input_dirs": {"sep": Delimiter.DASH.repeat(40), "msg": "Load Input Dirs", "width": 20},
+            "src_dirs": {"sep": Delimiter.DASH.repeat(40), "msg": "Select Src Dirs", "width": 20},
             "csv_load": {"sep": Delimiter.DASH.repeat(40), "msg": "CSV load", "width": 20},
             "manual_load": {"sep": Delimiter.DASH.repeat(40), "msg": "Manual load", "width": 20},
             "depth": {"sep": Delimiter.DASH.repeat(40), "msg": "Depth", "width": 20}
@@ -96,8 +96,8 @@ cli_objects = {
 }
 
 cli_grouped_objects = {
-    "input_dirs_menu": [
-        ("header", "input_dirs"),
+    "src_dirs_menu": [
+        ("header", "src_dirs"),
         ("menu_line", "exit"),
         ("menu_line", "csv_load"),
         ("menu_line", "manual_load")

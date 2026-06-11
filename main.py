@@ -4,7 +4,7 @@ from configs.db_cfg import DB_INIT_CFG, DB_RESET_FLAGS, DB_CALC
 from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
 from cli.renderer import render_cli_object
 from core.env_setup import download_tool
-from core.dir_input import get_dest_dir, get_input_dirs
+from core.dir_input import get_dest_dir, get_src_dirs
 from core.processing_scope import collect_files_to_organise
 from core.df_processor import DfProcessor, DfWriter
 from core.transformation import fill_missing_values, assemble_dest_path
@@ -17,8 +17,19 @@ from utils.text import uppercase_text
 from utils.json import load_json, save_json
 from utils.path import is_file
 
+# [user input] instead of os.walk(), create recursion based on os.scandir()
+# [user input] self-reporting improvement
+# [user input] manage lowercase path cases in manual input
+# [df] incorporate schema validation
+# [df] automate file loading process
+# [df] externalize ref and db merge
+# [df] develop columns provision flow
+# [df] divide dfprocessor class methods like transform, compute, filter into separate classes
+# [dest path] .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
+# [dest path] use id3:year for music
+
 path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExtension", "CountWorksheets", "FileName"]
-report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "TargetPath"]
+report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "DestPath"]
 report_name = "migration_report"
 
 def main():
@@ -62,8 +73,8 @@ def main():
         dest_dir = get_dest_dir(cli_objects)
         if not dest_dir:
             return 1
-        input_dirs = get_input_dirs(cli_grouped_objects, cli_objects)
-        if not input_dirs:
+        src_dirs = get_src_dirs(cli_grouped_objects, cli_objects)
+        if not src_dirs:
             return 1
     except Exception as e:
         print(e)
@@ -71,7 +82,7 @@ def main():
     #########    PROCESSING SCOPE    #########
     
     try:
-        dirs, files_to_organise = collect_files_to_organise(input_dirs, cli_objects=cli_objects)
+        dirs, files_to_organise = collect_files_to_organise(src_dirs, cli_objects=cli_objects)
     except Exception as e:
         print(e)
 
@@ -166,7 +177,7 @@ def main():
     df_processor = DfProcessor(enriched_df)
     (
         df_processor
-        .transform(fill_missing_values("Other"),   func_mode="col",                        use_cols="Category")
+        .transform(fill_missing_values("Other"), func_mode="col", use_cols="Category")
         .compute(assemble_dest_path(dest_dir), func_mode="row", calc_col="DestPath", use_cols=path_components)
     )
     report_df = df_processor.filter_cols(names=report_cols).active_selection

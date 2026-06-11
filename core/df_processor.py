@@ -2,10 +2,6 @@ import pandas as pd
 import operator
 import os
 
-# To improve:
-# incorporate schema validation
-# automate file loading process
-
 OPERATORS = {
     "AND": operator.and_,
     "OR": operator.or_,
