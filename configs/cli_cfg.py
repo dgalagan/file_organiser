@@ -45,7 +45,7 @@ cli_objects = {
             "msg": "Provide your option: "
         },
         "elements": {
-            "setup_env": {"msg": "Delete content from {target_path} permanently? (y/n): "},
+            "clean": {"msg": "Delete content from {dest_dir} permanently (y/n)? "},
             "csv": {"msg": "Enter link to CSV file: "},
             "manual": {"msg": "Enter dir path: "},
             "manual_additional": {"msg": "Add another one: "},

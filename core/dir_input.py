@@ -55,7 +55,7 @@ def prepare_dest_dir(path: str, cli_objects: dict) -> bool:
     # Interact with user in case directory has files
     while True:
         try:
-            permission = input(render_cli_object(cli_objects["prompt"], element_name="setup_env", target_path=path))
+            permission = input(render_cli_object(cli_objects["prompt"], element_name="clean", dest_dir=path))
         except KeyboardInterrupt:
             print()
             return False

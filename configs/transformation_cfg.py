@@ -1,5 +1,5 @@
 from configs.env_cfg import EXIF_DB_NAME, HASH_DB_NAME, EXTENSION_REF_NAME
-from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate
+from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, get_country
 import pandas as pd
 from utils.path import is_not_dir, get_normalized_path, get_dir_depth, get_branch_depth
 
@@ -46,6 +46,7 @@ PIPELINE = {
         {"op": "compute",     "func": (pd.Series.min, "row"),                    "calc_col": "AggTimestamp",      "use_keywords": COLUMN_TAGS["created_dt"]},
         {"op": "compute",     "func": (get_year, "element"),                     "calc_col": "Year",              "use_cols": "AggTimestamp"},
         {"op": "compute",     "func": (get_worksheets_count, "element"),         "calc_col": "CountWorksheets",   "use_cols": "DocumentStructure"},
+        {"op": "compute",     "func": (get_country, "row"),                      "calc_col": "Country",           "use_cols": ["Latitude", "Longitude"]},
     ],
     HASH_DB_NAME: [
         {"op": "compute",     "func": (pd.Series.duplicated, "col"),             "calc_col": "IsDuplicate",       "use_cols": "Hash"},

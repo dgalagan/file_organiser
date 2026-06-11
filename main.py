@@ -28,8 +28,8 @@ from utils.path import is_file
 # [dest path] .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
 # [dest path] use id3:year for music
 
-path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExtension", "CountWorksheets", "FileName"]
-report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "CountWorksheets", "DestPath"]
+path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "Country", "FileExtension", "CountWorksheets", "FileName"]
+report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "Country", "CountWorksheets", "DestPath"]
 report_name = "migration_report"
 
 def main():

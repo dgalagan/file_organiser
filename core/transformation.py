@@ -2,6 +2,7 @@ import datetime as dt
 import json
 import pandas as pd
 import os
+import reverse_geocoder as rg
 from utils.text import get_chars_pattern
 
 class DateParser:
@@ -59,7 +60,7 @@ class DateParser:
 def get_year(timestamp: float) -> int:
     return dt.datetime.fromtimestamp(timestamp).year
 
-def get_worksheets_count(heading_pairs: list) -> int:
+def get_worksheets_count(heading_pairs: list) -> int: # hardcoding
     if not isinstance(heading_pairs, list):
         return None
     
@@ -71,7 +72,7 @@ def get_worksheets_count(heading_pairs: list) -> int:
 
     return None
 
-def label_duplicate(value: str):
+def label_duplicate(value: str): # hardcoding
     return "duplicate" if value else "original"
 
 def fill_missing_values(filler: str):
@@ -88,6 +89,18 @@ def assemble_dest_path(dest_dir: str):
         return os.path.join(dest_dir, *path_fragments)
 
     return build_path
+
+rg_instance = rg.RGeocoder(mode=1, verbose=False)
+
+def get_country(row: pd.Series) -> str:
+    lat = row.get("Latitude")
+    lon = row.get("Longitude")
+    
+    if pd.isna(lat) or pd.isna(lon):
+        return None
+    
+    result = rg_instance.query([(lat, lon)])
+    return result[0]["cc"]
 
 def calculate_coverage(json_path: str):
     exif_meta = json.load(json_path)
