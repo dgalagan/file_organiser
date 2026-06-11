@@ -14,7 +14,7 @@ import sys
 import shutil
 from tqdm import tqdm
 from utils.text import uppercase_text
-from utils.json import init_json, load_json, save_json, reset_json
+from utils.json import load_json, save_json
 from utils.path import is_file
 
 path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "FileExtension", "CountWorksheets", "FileName"]
@@ -32,17 +32,12 @@ def main():
         if not db_path:
             raise RuntimeError(f"No path resolved for {db_file}")
         reset = DB_RESET_FLAGS.get(db_file, False)
-        init_cfg = DB_INIT_CFG.get(db_file, {})
-        if not is_file(db_path):
+        if not is_file(db_path) or reset:
             try:
-                init_json(db_path, **init_cfg)
+                container = DB_INIT_CFG.get(db_file, {})
+                save_json(db_path, container)
             except (TypeError, IOError) as e:
                 raise RuntimeError(f"Failed to init {db_path}") from e
-        elif reset:
-            try:
-                reset_json(db_path)
-            except (TypeError, IOError, PermissionError) as e:
-                raise RuntimeError(f"Failed to reset {db_path}") from e
         print(f"✅ {db_file} available")
     
     # Resolve tools dependency

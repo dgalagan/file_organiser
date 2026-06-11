@@ -48,8 +48,7 @@ def get_target_dir():
                 if not dir_content:
                     break
                 if prepare_target_dir(target_dir_path):
-                    print(render_cli_object(cli_objects["flow_marker"]))
-                    print("Done")
+                    print("🎯 Done")
                     break
                 else:
                     print(render_cli_object(cli_objects["flow_marker"]))

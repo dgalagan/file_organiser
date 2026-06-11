@@ -7,6 +7,13 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # File settings
 ENCODING = "utf-8"
 
+# JSON settings
+JSON_SETTINGS = {
+    "encoding": ENCODING,
+    "indent": 4, 
+    "ensure_ascii": False,
+}
+
 # File names
 EXIF_DB_NAME = "exif_db.json"
 HASH_DB_NAME = "hash_db.json"
