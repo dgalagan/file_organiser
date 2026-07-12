@@ -1,11 +1,11 @@
 from cli.renderer import render_cli_object, render_cli_grouped_object
-from core.df_processor import DfProcessor
 from enum import StrEnum, auto
 import pandas as pd
 import os
-from utils.path import is_parent, is_dir, clean_dir, is_file
+from utils.path import is_parent, is_dir, clean_dir, is_file, is_not_dir, get_normalized_path, get_dir_depth, get_branch_depth
 from utils.text import lowercase_text, strip_text
-from configs.transformation_cfg import PIPELINE
+
+from df_worker import Context, Transform, Compute, FilterCols, NameFilter, FilterRows, Condition, And, ElementProcessor, RowProcessor, ColProcessor
 
 # Actions
 class MenuActions(StrEnum):
@@ -121,14 +121,14 @@ def load_dirs(cli_grouped_objects: dict, cli_objects: dict, input_option: str): 
             print(render_cli_grouped_object(cli_grouped_objects["manual_menu"], cli_objects))
             # Request user input
             try:
-                input_dirs = {"DirPath": []}
+                input_dirs = {}
                 while True:
                     prompt_key = "manual" if not input_dirs else "manual_additional"
                     input_dir = input(render_cli_object(cli_objects["prompt"], prompt_key))
                     input_dir = strip_text(input_dir)
                     if input_dir == "stop":
                         break
-                    input_dirs["DirPath"].append(input_dir)
+                    input_dirs.setdefault("DirPath", []).append(input_dir)
             except KeyboardInterrupt:
                 print()
                 return None, MenuActions.INTERUPT
@@ -137,13 +137,28 @@ def load_dirs(cli_grouped_objects: dict, cli_objects: dict, input_option: str): 
             except TypeError as e:
                 print(render_cli_object(cli_objects["warning"], "manual_load_failed", error=e))
                 continue
-        # Invalid Input
+        # INVALID Input
         else:
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
-        
+        # Process input df
+        ctx = Context()
+        pipeline = [
+            Transform(ElementProcessor(get_normalized_path),                    NameFilter("DirPath")),
+            Compute(ElementProcessor(is_not_dir),                               NameFilter("DirPath"), "isInvalid"),
+            Compute(ColProcessor(pd.Series.duplicated),                         NameFilter("DirPath"), "isDuplicate"),
+            FilterRows(And([Condition("isInvalid", "eq", False), Condition("isDuplicate", "eq", False)])),
+            Compute(ElementProcessor(get_dir_depth),                            NameFilter("DirPath"), "DirDepth"),
+            Compute(ElementProcessor(get_branch_depth),                         NameFilter("DirPath"), "BranchDepth"),
+            Compute(RowProcessor(lambda r: r["BranchDepth"] - r["DirDepth"]),   NameFilter(["BranchDepth", "DirDepth"]), "BranchDepthFromDir"),
+        ]
+
+        for step in pipeline:
+            df = step.run(df, ctx)
+
         # Get data
-        dir_data = DfProcessor(df).run_pipeline(PIPELINE["user_dirs"]).active_selection.sort_values("DirDepth", ascending=True).reset_index()
+        # dir_data = DfProcessor(df).run_pipeline(PIPELINE["user_dirs"]).active_selection.sort_values("DirDepth", ascending=True).reset_index()
+        dir_data = df.sort_values("DirDepth", ascending=True).reset_index()
 
         # Resolve parent-child relationship clash
         reload = False

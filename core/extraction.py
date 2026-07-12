@@ -29,6 +29,7 @@ def extract_exif_data(files: list[str], config: dict):
                     batch_results = json.loads(raw_output)
                 except Exception as e:
                     batch_results = []
+                
                 for file_result in batch_results:
                     file = file_result.get("SourceFile", "").replace('/', os.sep)
                     yield file, file_result

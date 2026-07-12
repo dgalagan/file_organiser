@@ -1,9 +1,10 @@
 from configs.env_cfg import EXIF_DB_NAME, HASH_DB_NAME, EXTENSION_REF_NAME
-from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, get_country
+from core.transformation import DateParser, get_worksheets_count, get_year, label_duplicate, get_country, get_min_year, build_path
 import pandas as pd
 from utils.path import is_not_dir, get_normalized_path, get_dir_depth, get_branch_depth
+from df_worker import Context, Transform, Compute, FilterCols, NameFilter, TagFilter, FilterRows, Condition, And, ElementProcessor, RowProcessor, ColProcessor
 
-COLUMNS_ALIASES = {
+COLUMN_ALIASES = {
     EXIF_DB_NAME: {
         "File:FileName"             : "FileName",
         "File:FileSize"             : "FileSize",
@@ -24,32 +25,40 @@ COLUMNS_ALIASES = {
     }
 }
 
-COLUMN_TAGS = {
-    "created_dt":   ["createdate", "creationdate", "datetimeoriginal", "datetimedigitized", ], # "exe:timestamp", "xmp:timestamp", "png:exifdatetime", "composite:gpsdatetime", "quicktime:purchasedate", "createddatetime", "datetimecreated", "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
-    "access_dt":    ["accessdate", "lastplayed", "lastprinted"],
-    "modify_dt":    ["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]
+date_parser = DateParser()
+
+tag_cfg = {
+    "created_dt": {
+        "keywords": ["createdate", "creationdate", "datetimeoriginal", "datetimedigitized"], #  "createddatetime", "datetimecreated", "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
+        "items": ["ID3:Year", "EXE:TimeStamp", "XMP:Timestamp", "PNG:ExifDateTime", "Composite:GPSDateTime", "QuickTime:PurchaseDate"]
+    },
+    "access_dt": {
+        "keywords": ["accessdate", "lastplayed", "lastprinted"],
+    },
+    "modify_dt": {
+        "keywords": ["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"],
+    },
+    "required": {
+        "items": ["File:FileName", "File:FileSize", "File:FileTypeExtension", "XML:HeadingPairs", "EXIF:GPSLatitude", "EXIF:GPSLongitude", "EXIF:Model"]
+    }
 }
 
-PIPELINE = {
-    "user_dirs": [
-        {"op": "transform",   "func": (get_normalized_path, "element"),                                           "use_cols": "DirPath"},
-        {"op": "compute",     "func": (is_not_dir, "element"),                  "calc_col": "isInvalid",          "use_cols": "DirPath"},
-        {"op": "compute",     "func": (pd.Series.duplicated, "col"),            "calc_col": "isDuplicate",        "use_cols": "DirPath"},
-        {"op": "filter_rows", "cond": {"col": "isInvalid",   "comparator": "==", "val": False, "mask_junc": "AND"}},
-        {"op": "filter_rows", "cond": {"col": "isDuplicate", "comparator": "==", "val": False, "mask_junc": "AND"}},
-        {"op": "compute",     "func": (get_dir_depth, "element"),               "calc_col": "DirDepth",           "use_cols": "DirPath"},
-        {"op": "compute",     "func": (get_branch_depth, "element"),            "calc_col": "BranchDepth",        "use_cols": "DirPath"},
-        {"op": "compute",     "func": (lambda r: r.iloc[0] - r.iloc[1], "row"), "calc_col": "BranchDepthFromDir", "use_cols": ["BranchDepth", "DirDepth"]},
-    ],
-    EXIF_DB_NAME: [
-        {"op": "transform",   "func": (DateParser().parse, "element"),                                            "use_keywords": COLUMN_TAGS["created_dt"]},
-        {"op": "compute",     "func": (pd.Series.min, "row"),                    "calc_col": "AggTimestamp",      "use_keywords": COLUMN_TAGS["created_dt"]},
-        {"op": "compute",     "func": (get_year, "element"),                     "calc_col": "Year",              "use_cols": "AggTimestamp"},
-        {"op": "compute",     "func": (get_worksheets_count, "element"),         "calc_col": "CountWorksheets",   "use_cols": "DocumentStructure"},
-        {"op": "compute",     "func": (get_country, "row"),                      "calc_col": "Country",           "use_cols": ["Latitude", "Longitude"]},
-    ],
-    HASH_DB_NAME: [
-        {"op": "compute",     "func": (pd.Series.duplicated, "col"),             "calc_col": "IsDuplicate",       "use_cols": "Hash"},
-        {"op": "compute",     "func": (label_duplicate, "element"),              "calc_col": "DuplicateLabel",    "use_cols": "IsDuplicate"},
-    ]
+PIPELINES = {
+    EXIF_DB_NAME: {
+        "tag_cfg": tag_cfg,
+        "steps": [
+            FilterCols(TagFilter("build")),
+            Transform(ElementProcessor(date_parser.parse), TagFilter(["created_dt", "modify_dt"])),
+            Compute(RowProcessor(get_min_year), TagFilter(["created_dt", "modify_dt"]), "Year"),
+            Compute(ElementProcessor(get_worksheets_count), NameFilter("XML:HeadingPairs"), "CountWorksheets"),
+            Compute(RowProcessor(get_country, {"lat_col": "EXIF:GPSLatitude", "lon_col": "EXIF:GPSLongitude"}), NameFilter(["EXIF:GPSLatitude", "EXIF:GPSLongitude"]), "Country")
+        ]
+    },
+
+    HASH_DB_NAME: {
+        "steps": [
+            Compute(ColProcessor(pd.Series.duplicated), NameFilter("hash"), "IsDuplicate"),
+            Compute(ElementProcessor(label_duplicate), NameFilter("IsDuplicate"), "DuplicateLabel"),
+        ]
+    },
 }

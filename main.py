@@ -1,13 +1,13 @@
 from configs.cli_cfg import cli_objects, cli_grouped_objects
 from configs.env_cfg import FILE_MANIFEST, FILE_PATHS, EXECUTABLE_MANIFEST, EXECUTABLE_PATHS, EXECUTABLE_URLS, ENCODING_CSV
 from configs.db_cfg import DB_INIT_CFG, DB_RESET_FLAGS, DB_CALC
-from configs.transformation_cfg import COLUMNS_ALIASES, PIPELINE
+from configs.transformation_cfg import COLUMN_ALIASES, PIPELINES
 from cli.renderer import render_cli_object
 from core.env_setup import download_tool
 from core.dir_input import get_dest_dir, get_src_dirs
 from core.processing_scope import collect_files_to_organise
-from core.df_processor import DfProcessor, DfWriter
-from core.transformation import fill_missing_values, assemble_dest_path
+from core.df_processor import DfWriter
+from core.transformation import build_path
 import os
 import pandas as pd
 import sys
@@ -16,6 +16,9 @@ from tqdm import tqdm
 from utils.text import uppercase_text
 from utils.json import load_json, save_json
 from utils.path import is_file
+import warnings
+
+from df_worker import TagStore, Context, Transform, Compute, FilterCols, NameFilter, TagFilter, FilterRows, Condition, And, ElementProcessor, RowProcessor, ColProcessor
 
 # [user input] instead of os.walk(), create recursion based on os.scandir()
 # [user input] self-reporting improvement
@@ -25,7 +28,6 @@ from utils.path import is_file
 # [df] externalize ref and db merge
 # [df] develop columns provision flow
 # [df] divide dfprocessor class methods like transform, compute, filter into separate classes
-# [dest path] .compute(function needed, store_col="Location", col_names=["EXIF:GPSLatitude", "EXIF:GPSLongitude"])
 # [dest path] use id3:year for music
 
 path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "Country", "FileExtension", "CountWorksheets", "FileName"]
@@ -157,32 +159,43 @@ def main():
         try:
             refdata = load_json(FILE_PATHS[ref_file])
             refdata_df = pd.DataFrame.from_dict(refdata, orient="index")
-            refdata_df = refdata_df.rename(columns=COLUMNS_ALIASES[ref_file]).rename(uppercase_text, axis="index")
+            refdata_df = refdata_df.rename(columns=COLUMN_ALIASES[ref_file]).rename(uppercase_text, axis="index")
             refdata_dfs[ref_file] = refdata_df
         except Exception as e:
             print(e)
 
     # Load runtime data into df
     metadata_dfs = {}
-    for runtime_key, runtime_dict in runtime_data.items():
+    for source, runtime_dict in runtime_data.items():
         metadata_df = pd.DataFrame.from_dict(runtime_dict, orient="index")
-        metadata_df = metadata_df.rename(columns=COLUMNS_ALIASES[runtime_key])
-        metadata_df = DfProcessor(metadata_df).run_pipeline(PIPELINE[runtime_key]).df
-        metadata_dfs[runtime_key] = metadata_df
+        if metadata_df.empty:
+            warnings.warn(f"[{source}] has no data - skipping")
+            continue
+        pipeline = PIPELINES.get(source, {})
+        ctx = Context(store=TagStore().apply_config(pipeline.get("tag_cfg", {}), metadata_df.columns))
+        for step in pipeline.get("steps", []):
+            metadata_df = step.run(metadata_df, ctx)
+        metadata_df = metadata_df.rename(columns=COLUMN_ALIASES[source])
+        metadata_dfs[source] = metadata_df
     full_metadata = pd.concat(metadata_dfs.values(), axis=1)
 
     # Join refdata
     refdata_df = refdata_dfs["extension_ref.json"]
     enriched_df = pd.merge(full_metadata, refdata_df[["Category"]], how="left", left_on="FileExtension", right_index=True)
-    df_processor = DfProcessor(enriched_df)
-    (
-        df_processor
-        .transform(fill_missing_values("Other"), func_mode="col", use_cols="Category")
-        .compute(assemble_dest_path(dest_dir), func_mode="row", calc_col="DestPath", use_cols=path_components)
-    )
-    report_df = df_processor.filter_cols(names=report_cols).active_selection
+    
+    # Transform enriched df
+    pipeline = [
+        Transform(ColProcessor(pd.Series.fillna, {"value": "Other"}), NameFilter("Category")),
+        Compute(RowProcessor(build_path, {"dest_dir": dest_dir}), NameFilter(path_components), "DestPath")
+        ]
+    ctx = Context()
+    for step in pipeline:
+        enriched_df = step.run(enriched_df, ctx)
+    
+    # Save report
+    report_df = enriched_df[report_cols]
     report_path = os.path.join(dest_dir, "migration_report.csv")
-    DfWriter.write(report_df, extension="csv", filepath=report_path, encoding=ENCODING_CSV)
+    DfWriter.write(enriched_df, extension="csv", filepath=report_path, encoding=ENCODING_CSV)
     print(render_cli_object(cli_objects["divider"]))
     #########     CHECK DISK SPACE    #########
     

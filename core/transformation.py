@@ -1,5 +1,4 @@
 import datetime as dt
-import json
 import pandas as pd
 import os
 import reverse_geocoder as rg
@@ -8,57 +7,66 @@ from utils.text import get_chars_pattern
 class DateParser:
     def __init__(self):
         self.dt_patterns = {
+            "dddd":                             "%Y",
             "ddddsddsdd":                       "%Y{s0}%m{s1}%d",
             "ddddsddsddwddsdd":                 "%Y{s0}%m{s1}%d %H{s2}%M",
             "ddddsddsddwddsddl":                "%Y{s0}%m{s1}%d %H{s2}%MZ",
             "ddddsddsddwddsddsdd":              "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S",
+            "ddddsddsddlddsddsdd":              "%Y{s0}%m{s1}%dT%H{s2}%M{s3}%S",
             "ddddsddsddlddsddsddl":             "%Y{s0}%m{s1}%dT%H{s2}%M{s3}%SZ",
             "ddddsddsddwddsddsddl":             "%Y{s0}%m{s1}%d %H{s2}%M{s3}%SZ",
+            "ddddsddsddlddsddsddsddsdd":        "%Y{s0}%m{s1}%dT%H{s2}%M{s3}%S%z",
+            "ddddsddsddwddsddsddsddsdd":        "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S%z",
+            
+            "ddddsddsddwddsddsddsd":            "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
             "ddddsddsddwddsddsddsdd":           "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
             "ddddsddsddwddsddsddsddd":          "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
-            "ddddsddsddwddsddsddsddsdd":        "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S%z",
-            "ddddsddsddwddsddsddsdddsddsdd":    "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z"
-        }
-        self.dt_nulls = [
-            "0000:00:00 00:00:00",
-            "0000:01:01 00:00:00",
-            "1980:00:00 00:00:00",
-            "1980:01:01 00:00:00"
-        ]
-        self.dt_failed = []
-        self.unknown_patterns = set()
-        self.summary = {dt_pattern: [0, 0] for dt_pattern in self.dt_patterns}
+            "ddddsddsddwddsddsddsdddd":         "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
+            "ddddsddsddwddsddsddsddddd":        "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
+            "ddddsddsddwddsddsddsdddddd":       "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f",
 
-    def parse(self, dt_str: str):
-        # Validate that the input is a valid string
-        if not isinstance(dt_str, str):
+            "ddddsddsddwddsddsddsdsddsdd":      "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z",
+            "ddddsddsddwddsddsddsddsddsdd":     "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z",
+            "ddddsddsddwddsddsddsdddsddsdd":    "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z",
+            "ddddsddsddwddsddsddsddddsddsdd":   "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z",
+            "ddddsddsddwddsddsddsdddddsddsdd":  "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z",
+            "ddddsddsddwddsddsddsddddddsddsdd": "%Y{s0}%m{s1}%d %H{s2}%M{s3}%S{s4}%f%z",
+        }
+        self.dt_nulls = ["0000:00:00 00:00:00", "0000:01:01 00:00:00", "1980:00:00 00:00:00", "1980:01:01 00:00:00"]
+        self.summary = {dt_pattern: {"success": 0, "failed": 0, "null": 0, "failed_dates":[]} for dt_pattern in self.dt_patterns}
+
+    def parse(self, date):
+        # Do not process nan values
+        if pd.isna(date):
             return None
         
-        # Reject known null-equivalent or placeholder strings
-        if dt_str in self.dt_nulls:
-            return None
-        
+        date_str = str(date) if not isinstance(date, str) else date
+
         # Parse the string into its structural character pattern and separators
-        chars_pattern, sep_args = get_chars_pattern(dt_str)
-        
+        chars_pattern, sep_args = get_chars_pattern(date_str)
+
         # Log unvalidated patterns and skip processing if the format is unrecognized
         if chars_pattern not in self.dt_patterns:
-            self.unknown_patterns.add(chars_pattern)
+            self.summary[chars_pattern] = {"success": 0, "failed": 0, "null": 0, "failed_dates":[]}
+
+        # Reject known null-equivalent or placeholder strings
+        if date_str in self.dt_nulls:
+            self.summary[chars_pattern]["null"] += 1
             return None
-        
+
         # Dynamically build the datetime format string and parse it into a Unix timestamp
         try:
             dt_strf = self.dt_patterns[chars_pattern].format(**sep_args)
-            timestamp = dt.datetime.strptime(dt_str, dt_strf).timestamp()
-            self.summary[chars_pattern][0] += 1 
+            timestamp = dt.datetime.strptime(date_str, dt_strf).timestamp()
+            self.summary[chars_pattern]["success"] += 1
             return timestamp
-        except Exception as e:
-            self.dt_failed.append(dt_str)
-            self.summary[chars_pattern][1] += 1 
+        except:
+            self.summary[chars_pattern]["failed_dates"].append(date_str)
+            self.summary[chars_pattern]["failed"] += 1
             return None
-
-def get_year(timestamp: float) -> int:
-    return dt.datetime.fromtimestamp(timestamp).year
+    
+    def get_summary(self):
+        return self.summary
 
 def get_worksheets_count(heading_pairs: list) -> int: # hardcoding
     if not isinstance(heading_pairs, list):
@@ -75,41 +83,23 @@ def get_worksheets_count(heading_pairs: list) -> int: # hardcoding
 def label_duplicate(value: str): # hardcoding
     return "duplicate" if value else "original"
 
-def fill_missing_values(filler: str):
-    
-    def fill_column(col: pd.Series) -> pd.Series:
-        return col.fillna(value=filler)
-    
-    return fill_column
-
-def assemble_dest_path(dest_dir: str):
-    
-    def build_path(row: pd.Series) -> pd.Series:
-        path_fragments = [str(value) for value in row if pd.notna(value)]
-        return os.path.join(dest_dir, *path_fragments)
-
-    return build_path
+def build_path(row: pd.Series, dest_dir: str) -> pd.Series:
+    path_fragments = [str(value) for value in row if pd.notna(value)]
+    return os.path.join(dest_dir, *path_fragments)
 
 rg_instance = rg.RGeocoder(mode=1, verbose=False)
 
-def get_country(row: pd.Series) -> str:
-    lat = row.get("Latitude")
-    lon = row.get("Longitude")
+def get_country(row: pd.Series, lat_col: str, lon_col: str) -> str:
+    lat, lon = row.get(lat_col), row.get(lon_col)
     
     if pd.isna(lat) or pd.isna(lon):
         return None
-    
-    result = rg_instance.query([(lat, lon)])
-    return result[0]["cc"]
 
-def calculate_coverage(json_path: str):
-    exif_meta = json.load(json_path)
-    coverage_report = {}
-    for exif_dict in exif_meta:
-        for feature, value in exif_dict.items():
-            if feature == "File:FileTypeExtension":
-                if value in coverage_report:
-                    coverage_report[value].append(exif_dict)
-                else:
-                    coverage_report[value] = [exif_dict]    
-    return coverage_report
+    return rg_instance.query([(lat, lon)])[0]["cc"]
+
+def get_year(timestamp: float) -> int:
+    return dt.datetime.fromtimestamp(timestamp).year
+
+def get_min_year(row: pd.Series) -> int:
+    timestamp = row.min()
+    return dt.datetime.fromtimestamp(timestamp).year
