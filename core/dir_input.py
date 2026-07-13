@@ -5,7 +5,10 @@ import os
 from utils.path import is_parent, is_dir, clean_dir, is_file, is_not_dir, get_normalized_path, get_dir_depth, get_branch_depth
 from utils.text import lowercase_text, strip_text
 
-from df_worker import Context, Transform, Compute, FilterCols, NameFilter, FilterRows, Condition, And, ElementProcessor, RowProcessor, ColProcessor
+from dataframe.pipeline import Pipeline, AssignTags, FilterCols, FilterRows, Compute, Transform
+from dataframe.col_filter import KeywordFilter, NameFilter, TagFilter
+from dataframe.processor import ElementProcessor, RowProcessor, ColProcessor
+from dataframe.predicate import Condition, And
 
 # Actions
 class MenuActions(StrEnum):
@@ -142,23 +145,19 @@ def load_dirs(cli_grouped_objects: dict, cli_objects: dict, input_option: str): 
             print(render_cli_object(cli_objects["warning"], "invalid_input"))
             return None, MenuActions.FAILED
         # Process input df
-        ctx = Context()
-        pipeline = [
-            Transform(ElementProcessor(get_normalized_path),                    NameFilter("DirPath")),
-            Compute(ElementProcessor(is_not_dir),                               NameFilter("DirPath"), "isInvalid"),
-            Compute(ColProcessor(pd.Series.duplicated),                         NameFilter("DirPath"), "isDuplicate"),
-            FilterRows(And([Condition("isInvalid", "eq", False), Condition("isDuplicate", "eq", False)])),
-            Compute(ElementProcessor(get_dir_depth),                            NameFilter("DirPath"), "DirDepth"),
-            Compute(ElementProcessor(get_branch_depth),                         NameFilter("DirPath"), "BranchDepth"),
-            Compute(RowProcessor(lambda r: r["BranchDepth"] - r["DirDepth"]),   NameFilter(["BranchDepth", "DirDepth"]), "BranchDepthFromDir"),
-        ]
-
-        for step in pipeline:
-            df = step.run(df, ctx)
-
+        pipeline = Pipeline(
+            [
+                Transform(ElementProcessor(get_normalized_path), NameFilter("DirPath")),
+                Compute(ElementProcessor(is_not_dir), NameFilter("DirPath"), "isInvalid"),
+                Compute(ColProcessor(pd.DataFrame.duplicated), NameFilter("DirPath"), "isDuplicate"),
+                FilterRows(And([Condition("isInvalid", "eq", False), Condition("isDuplicate", "eq", False)])),
+                Compute(ElementProcessor(get_dir_depth), NameFilter("DirPath"), "DirDepth"),
+                Compute(ElementProcessor(get_branch_depth), NameFilter("DirPath"), "BranchDepth"),
+                Compute(RowProcessor(lambda r: r["BranchDepth"] - r["DirDepth"]), NameFilter(["BranchDepth", "DirDepth"]), "BranchDepthFromDir"),
+            ]
+        )
         # Get data
-        # dir_data = DfProcessor(df).run_pipeline(PIPELINE["user_dirs"]).active_selection.sort_values("DirDepth", ascending=True).reset_index()
-        dir_data = df.sort_values("DirDepth", ascending=True).reset_index()
+        dir_data = pipeline.execute(df).sort_values("DirDepth", ascending=True).reset_index()
 
         # Resolve parent-child relationship clash
         reload = False

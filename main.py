@@ -6,7 +6,6 @@ from cli.renderer import render_cli_object
 from core.env_setup import download_tool
 from core.dir_input import get_dest_dir, get_src_dirs
 from core.processing_scope import collect_files_to_organise
-from core.df_processor import DfWriter
 from core.transformation import build_path
 import os
 import pandas as pd
@@ -18,7 +17,10 @@ from utils.json import load_json, save_json
 from utils.path import is_file
 import warnings
 
-from df_worker import TagStore, Context, Transform, Compute, FilterCols, NameFilter, TagFilter, FilterRows, Condition, And, ElementProcessor, RowProcessor, ColProcessor
+from dataframe.pipeline import Pipeline, AssignTags, FilterCols, Compute, Transform
+from dataframe.col_filter import KeywordFilter, NameFilter, TagFilter
+from dataframe.processor import ElementProcessor, RowProcessor, ColProcessor
+from dataframe.save import CSVWriter
 
 # [user input] instead of os.walk(), create recursion based on os.scandir()
 # [user input] self-reporting improvement
@@ -26,13 +28,9 @@ from df_worker import TagStore, Context, Transform, Compute, FilterCols, NameFil
 # [df] incorporate schema validation
 # [df] automate file loading process
 # [df] externalize ref and db merge
-# [df] develop columns provision flow
-# [df] divide dfprocessor class methods like transform, compute, filter into separate classes
-# [dest path] use id3:year for music
 
 path_components = ["DuplicateLabel", "Category", "Year", "CameraModel", "Country", "FileExtension", "CountWorksheets", "FileName"]
 report_cols = ["FileName", "FileSize", "FileExtension", "Category", "DuplicateLabel", "Year", "CameraModel", "Country", "CountWorksheets", "DestPath"]
-report_name = "migration_report"
 
 def main():
     
@@ -171,10 +169,8 @@ def main():
         if metadata_df.empty:
             warnings.warn(f"[{source}] has no data - skipping")
             continue
-        pipeline = PIPELINES.get(source, {})
-        ctx = Context(store=TagStore().apply_config(pipeline.get("tag_cfg", {}), metadata_df.columns))
-        for step in pipeline.get("steps", []):
-            metadata_df = step.run(metadata_df, ctx)
+        pipeline = PIPELINES.get(source, Pipeline())
+        metadata_df = pipeline.execute(metadata_df)
         metadata_df = metadata_df.rename(columns=COLUMN_ALIASES[source])
         metadata_dfs[source] = metadata_df
     full_metadata = pd.concat(metadata_dfs.values(), axis=1)
@@ -182,20 +178,17 @@ def main():
     # Join refdata
     refdata_df = refdata_dfs["extension_ref.json"]
     enriched_df = pd.merge(full_metadata, refdata_df[["Category"]], how="left", left_on="FileExtension", right_index=True)
-    
-    # Transform enriched df
-    pipeline = [
-        Transform(ColProcessor(pd.Series.fillna, {"value": "Other"}), NameFilter("Category")),
-        Compute(RowProcessor(build_path, {"dest_dir": dest_dir}), NameFilter(path_components), "DestPath")
+    pipeline = Pipeline(
+        [
+            Transform(ColProcessor(pd.DataFrame.fillna, {"value": "Other"}), NameFilter("Category")),
+            Compute(RowProcessor(build_path, {"dest_dir": dest_dir}), NameFilter(path_components), "DestPath")
         ]
-    ctx = Context()
-    for step in pipeline:
-        enriched_df = step.run(enriched_df, ctx)
-    
+    )
+    enriched_df = pipeline.execute(enriched_df)
     # Save report
     report_df = enriched_df[report_cols]
-    report_path = os.path.join(dest_dir, "migration_report.csv")
-    DfWriter.write(enriched_df, extension="csv", filepath=report_path, encoding=ENCODING_CSV)
+    writer = CSVWriter(dest_dir, "migration_report", encoding=ENCODING_CSV)
+    writer.save(report_df)
     print(render_cli_object(cli_objects["divider"]))
     #########     CHECK DISK SPACE    #########
     
