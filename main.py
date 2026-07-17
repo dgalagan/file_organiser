@@ -1,8 +1,8 @@
-from configs.cli_cfg import cli_objects, cli_grouped_objects
 from configs.env_cfg import FILE_MANIFEST, FILE_PATHS, EXECUTABLE_MANIFEST, EXECUTABLE_PATHS, EXECUTABLE_URLS, ENCODING_CSV
 from configs.db_cfg import DB_INIT_CFG, DB_RESET_FLAGS, DB_CALC
 from configs.transformation_cfg import COLUMN_ALIASES, PIPELINES
-from cli.renderer import render_cli_object
+from cli.tokens import Icon, Separator
+from cli.components import Info
 from core.env_setup import download_tool
 from core.dir_input import get_dest_dir, get_src_dirs
 from core.processing_scope import collect_files_to_organise
@@ -70,10 +70,10 @@ def main():
     
     #########       USER INPUT       #########
     try:
-        dest_dir = get_dest_dir(cli_objects)
+        dest_dir = get_dest_dir()
         if not dest_dir:
             return 1
-        src_dirs = get_src_dirs(cli_grouped_objects, cli_objects)
+        src_dirs = get_src_dirs()
         if not src_dirs:
             return 1
     except Exception as e:
@@ -82,7 +82,7 @@ def main():
     #########    PROCESSING SCOPE    #########
     
     try:
-        dirs, files_to_organise = collect_files_to_organise(src_dirs, cli_objects=cli_objects)
+        dirs, files_to_organise = collect_files_to_organise(src_dirs)
     except Exception as e:
         print(e)
 
@@ -119,7 +119,7 @@ def main():
         # Log the total number of files that require processing
         print(f"{len(processing_queue[db_file])} file(s) queued for [{db_file}] processing")
 
-    print(render_cli_object(cli_objects["divider"]))
+    print(Separator.DASH.repeat(100))
     # Handle processing queue
     for db_file, files_to_process in processing_queue.items():
         # Load storage
@@ -147,7 +147,8 @@ def main():
         except (TypeError, IOError, PermissionError) as e:
             raise RuntimeError(f"Failed to save {db_file}") from e
     
-    print(render_cli_object(cli_objects["divider"]))
+    print(Separator.DASH.repeat(100))
+    
     #########     TRANSFORM DATA     #########
     
     # Load ref data into df
@@ -169,7 +170,7 @@ def main():
         if metadata_df.empty:
             warnings.warn(f"[{source}] has no data - skipping")
             continue
-        pipeline = PIPELINES.get(source, Pipeline())
+        pipeline = PIPELINES.get(source, Pipeline([]))
         metadata_df = pipeline.execute(metadata_df)
         metadata_df = metadata_df.rename(columns=COLUMN_ALIASES[source])
         metadata_dfs[source] = metadata_df
@@ -189,7 +190,8 @@ def main():
     report_df = enriched_df[report_cols]
     writer = CSVWriter(dest_dir, "migration_report", encoding=ENCODING_CSV)
     writer.save(report_df)
-    print(render_cli_object(cli_objects["divider"]))
+    print(Separator.DASH.repeat(100))
+    
     #########     CHECK DISK SPACE    #########
     
     files_size = report_df["FileSize"].sum()
@@ -215,6 +217,6 @@ def main():
 if __name__ == "__main__":
     exit_code = main()
     if exit_code == 1:
-        print(render_cli_object(cli_objects["flow_marker"]))
-        print(render_cli_object(cli_objects["info"], "exit"))
+        print(Icon.DOWNARROW.repeat(3))
+        print(Info.get("exit"))
     sys.exit(exit_code)

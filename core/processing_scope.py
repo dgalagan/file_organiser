@@ -1,17 +1,12 @@
-from cli.renderer import render_cli_object
+from cli.tokens import Icon, Separator
 from utils.path import iter_dir_hierarchy
 import os
 from tqdm import tqdm
 
-def collect_files_to_organise(input_dirs: list[tuple], cli_objects: dict = None):
+def collect_files_to_organise(input_dirs: list[tuple]):
     dirs = set()
     files = set()
     tqdm_desc = "Extracting files from input dirs:"
-    divider = ""
-    flow_marker = ""
-    if cli_objects is not None:
-        divider = render_cli_object(cli_objects["divider"])
-        flow_marker = render_cli_object(cli_objects["flow_marker"])
     dirs_counter = 0
     files_counter = 0
     for input_dir, max_depth in tqdm(input_dirs, desc=f"{tqdm_desc:<40}", bar_format="{l_bar}{bar:60}{r_bar}{bar:-10b}"):
@@ -22,7 +17,7 @@ def collect_files_to_organise(input_dirs: list[tuple], cli_objects: dict = None)
                 file_path = os.path.join(dir, filename)
                 files.add(file_path)
                 files_counter += 1
-    print(flow_marker)
+    print(Separator.DASH.repeat(100))
     print(f"{dirs_counter} dirs scanned, {files_counter} files extracted")
-    print(divider)
+    print(Icon.DOWNARROW.repeat(3))
     return dirs, files
