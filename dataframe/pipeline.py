@@ -54,8 +54,9 @@ class Transform(Step):
         if ctx.store is not None:
             for col in cols:
                 ctx.store.assign_tag(col, "transformed")
+        # init Series[bool] for row filtering
         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
-
+        # execute calculation
         result = self.processor.process(df.loc[mask, cols])
         df[cols] = result.reindex(df.index)
         return df
@@ -75,7 +76,7 @@ class Compute(Step):
             ctx.store.assign_tag(self.output_col, "new")
         # init Series[bool] for row filtering
         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
-
+        # execute calculation
         result = self.processor.process(df.loc[mask, cols])
         df[self.output_col] = result.reindex(df.index)
         return df

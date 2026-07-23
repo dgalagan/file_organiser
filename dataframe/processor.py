@@ -1,23 +1,27 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import pandas as pd
 from typing import Callable
 
-@dataclass
+@dataclass(init=False)
 class Processor(ABC):
     func: Callable
-    kwargs: dict = field(default_factory=dict)
+    kwargs: dict
+
+    def __init__(self, func: Callable, **kwargs):
+        self.func = func
+        self.kwargs = kwargs
     
     @abstractmethod
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
     
-@dataclass
+@dataclass(init=False)
 class ElementProcessor(Processor):
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.map(self.func, **self.kwargs)
 
-@dataclass
+@dataclass(init=False)
 class RowProcessor(Processor):
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         # Ensure output contract
@@ -28,7 +32,7 @@ class RowProcessor(Processor):
 
         return result
 
-@dataclass
+@dataclass(init=False)
 class ColProcessor(Processor):
     def process(self, df: pd.DataFrame) -> pd.DataFrame:
         return self.func(df, **self.kwargs)

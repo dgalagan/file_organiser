@@ -37,6 +37,7 @@ class Emoji(Token):
     HOURGLASS = '⏳'
     CHEQUEREDFLAG = '🏁'
     GEAR = '⚙️' + Separator.SPACE
+    OPENFILEFOLDER = '📂'
 
 class Icon(Token):
     DOWNARROW = "↓"

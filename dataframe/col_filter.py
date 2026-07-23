@@ -60,3 +60,12 @@ class TagFilter(ColFilter):
 
     def filter(self, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
         return df[self.select(df, ctx)]
+    
+@dataclass
+class AllCols(ColFilter):
+
+    def select(self, df: pd.DataFrame, ctx: Context) -> list[str]:
+        return list(df.columns)
+
+    def filter(self, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
+        return df[self.select(df, ctx)]

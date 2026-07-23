@@ -140,23 +140,27 @@ def get_branch_depth(path: str) -> tuple[int, int]:
         for root, _ , _ in os.walk(path)
     )
 
-def iter_dir_hierarchy(path: str, max_depth_from_root: int) -> Iterator[tuple[int, str]]:
+def iter_dir_hierarchy(path: str, max_relative_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
     
     if is_not_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     
+    input_depth = get_dir_depth(path)
     for root, dirs, files in os.walk(path):
-        current_depth = get_dir_depth(root)
-        if current_depth >= max_depth_from_root:
+        
+        relative_depth = get_dir_depth(root) - input_depth
+        
+        if relative_depth >= max_relative_depth:
             dirs[:] = []
-        yield current_depth, root, files
+        
+        yield relative_depth, root, files
 
 def remove_readonly(func, path, _):
     "Clear the readonly bit and reattempt the removal"
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
-def clean_dir(path: str):
+def clean_dir(path: str) -> None:
     dir_content = os.listdir(path)
     for obj_name in dir_content:
         obj_path = os.path.join(path, obj_name)

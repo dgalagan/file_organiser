@@ -34,7 +34,12 @@ class And(Predicate):
     conditions: list[Predicate]
 
     def apply(self, df: pd.DataFrame) -> pd.Series:
-        mask = pd.Series(True, index=df.index)
+        mask = pd.Series(True, index=df.index) # identity for AND
         for cond in self.conditions:
             mask &= cond.apply(df)
         return mask
+    
+class All(Predicate):
+
+    def apply(self, df: pd.DataFrame) -> pd.Series:
+        return pd.Series(True, index=df.index)
