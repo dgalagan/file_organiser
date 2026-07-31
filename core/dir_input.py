@@ -3,7 +3,6 @@ from cli.tokens import Separator, Icon
 from enum import StrEnum, auto
 import os
 import pandas as pd
-from pipelines import user_input_pipeline
 from utils.path import is_parent, is_dir, clean_dir
 from utils.text import lowercase_text, strip_text
 

@@ -76,13 +76,14 @@ class Prompt(Component):
     EMOJI:  ClassVar[str] = Emoji.RIGHTARROW
     SEPARATOR: ClassVar[str] = Separator.SPACE
 
-    Options = Literal["base", "clean", "csv", "manual", "manual_additional"]    
+    Options = Literal["base", "clean", "csv", "manual", "manual_additional", "depth"]    
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "base":                 Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Provide your option: "),
         "clean":                Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Delete content from {path} permanently (y/n)? "),
         "csv":                  Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Enter link to CSV file: "),
         "manual":               Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Enter dir path: "),
         "manual_additional":    Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Add another one: "),
+        "depth":                Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Select 'depth level' from {range}: ")
     }
 
 @dataclass

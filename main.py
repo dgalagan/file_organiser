@@ -14,7 +14,7 @@ import shutil
 from tqdm import tqdm
 from utils.text import uppercase_text
 from utils.json import load_json, save_json
-from utils.path import iter_dir_hierarchy, is_file, get_dir_depth
+from utils.path import iter_dir_hierarchy, is_file
 import warnings
 import hashlib
 import json
@@ -30,6 +30,9 @@ load_dotenv()
 # [df] externalize ref and db merge
 # [df] Rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
+# i need to be able to move things back
+# i need a session id
+
 
 COLUMN_ALIASES = {
     "exif": {
@@ -178,7 +181,7 @@ def main():
     # Save report
     report_df = enriched_df[report_cols]
     CSVWriter("output", "migration_report").save(report_df)
-        
+
     ########        COPY/MOVE FILES        #########
     execution_df = pd.DataFrame(files, columns=["SrcPath"], index=list(files))
     execution_df["DestDir"] = report_df["DestDir"]

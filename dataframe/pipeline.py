@@ -58,7 +58,7 @@ class Transform(Step):
         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
         # execute calculation
         result = self.processor.process(df.loc[mask, cols])
-        df[cols] = result.reindex(df.index)
+        df[cols] = result.reindex(df.index, fill_value=pd.NA)
         return df
 
 # Compute
@@ -66,19 +66,19 @@ class Transform(Step):
 class Compute(Step):
     processor: Processor
     col_filter: ColFilter
-    output_col: str
+    dest_col: str
     where: Predicate | None = None
 
     def run(self, df: pd.DataFrame, ctx: Context):
         cols = self.col_filter.select(df, ctx)
         # update values in tag store if available
         if ctx.store is not None:
-            ctx.store.assign_tag(self.output_col, "new")
+            ctx.store.assign_tag(self.dest_col, "new")
         # init Series[bool] for row filtering
         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
         # execute calculation
         result = self.processor.process(df.loc[mask, cols])
-        df[self.output_col] = result.reindex(df.index)
+        df[self.dest_col] = result.reindex(df.index, fill_value=pd.NA)
         return df
 
 @dataclass

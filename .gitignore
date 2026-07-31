@@ -1,6 +1,6 @@
 __pycache__
 input/test.csv
-db/
+cache/
 output/
 bin/
 .env

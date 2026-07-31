@@ -126,11 +126,9 @@ def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> 
     except PermissionError:
         return ""
     
-def build_path(row: pd.Series, dest_dir: str) -> pd.Series:
-    path_fragments = [str(value) for value in row if pd.notna(value)]
-    return os.path.join(dest_dir, *path_fragments)
+def build_path(row: pd.Series, root: str) -> pd.Series:
+    path_components = [str(value) for value in row if pd.notna(value)]
+    return os.path.join(root, *path_components)
 
 def fill_na_from_col(row: pd.Series, from_col: str = "", to_col: str = ""):
-    if pd.isna(row[to_col]):
-        row[to_col] = row[from_col]
-    return row
+    return row[from_col] if pd.isna(row[to_col]) else row[to_col]
