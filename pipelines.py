@@ -21,7 +21,8 @@ def calc_cache_key(dev: str, ino: str, exif_args: list[str] | None = None) -> st
     parts = f"{dev}|{ino}|{"|".join(sorted(exif_args))}"
     return hashlib.md5(parts.encode()).hexdigest()
 
-def _preparation_pipeline():
+
+def prepare_dirs():
     return Pipeline(
             [
                 Transform(ElementProcessor(get_normalized_path), NameFilter("DirPath")),

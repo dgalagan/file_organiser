@@ -6,7 +6,7 @@ from cli.components import Info, Prompt
 from core.exiftool import find_exiftool, extract_exif_data
 from core.transformation import DateParser
 from dataframe.context import Context
-from dataframe.save import CSVWriter
+from dataframe.writer import CSVWriter
 from dotenv import load_dotenv
 import os
 import pandas as pd
@@ -247,8 +247,8 @@ def df_to_dict(df: pd.DataFrame, *, drop_na: bool = False, orient: str ="index")
     return df.to_dict(orient=orient)
 
 # General
-input_dirs = ["D:\MyOrganizedFiles"]
-dest_root = "D:\MyOrganizedFiles"
+src_roots = ["D:\\MyOrganizedFiles"]
+dest_root = "D:\\MyOrganizedFiles"
 
 # Operation
 action = "move"
@@ -321,10 +321,10 @@ data_df = pd.read_json(data_cache, orient="index")
 ref_df = pd.read_json(ref, orient="index").rename(uppercase_text, axis="index")
 
 # Processing scope
-input_dirs_df = prepare_dirs(input_dirs)
-input_dirs_df = add_depth_metrics().execute(input_dirs_df)
-selected_dirs_df = select_processing_targets(input_dirs_df)
-files_df, dirs_df = scan_directories(selected_dirs_df)
+src_roots_df = prepare_dirs(src_roots)
+src_roots_df = add_depth_metrics().execute(src_roots_df)
+selected_roots_df = select_processing_targets(src_roots_df)
+files_df, dirs_df = scan_directories(selected_roots_df)
 
 # Pre-processing
 files_df = add_file_path(prefix="").execute(files_df)
@@ -423,6 +423,6 @@ if not completed.empty:
     data_dict = df_to_dict(data_df, drop_na=True)
     save_json(data_cache, data_dict)
 
-CSVWriter("output", "completed").save(completed)
-CSVWriter("output", "skipped").save(skipped)
-CSVWriter("output", "failed").save(failed)
+CSVWriter("output/completed.csv").save(completed)
+CSVWriter("output/skipped.csv").save(skipped)
+CSVWriter("output/failed.csv").save(failed)

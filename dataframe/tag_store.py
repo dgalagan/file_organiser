@@ -1,10 +1,3 @@
-# def match_keywords(items: list[str], keywords: list[str]) -> Iterator[tuple[str, str]]:
-#     for kw in keywords:
-#         lk = kw.lower()
-#         for i in items:
-#             if lk in i.lower():
-#                 yield kw, i
-
 class TagStore:
     def __init__(self):
         self.tagged_items: dict[str, set] = {}
@@ -14,19 +7,6 @@ class TagStore:
         if not self.tagged_items:
             return set()
         return set().union(*self.tagged_items.values())
-
-    # def apply_config(self, tag_cfg: dict[str, dict[str, list[str]]], scope: list[str], default_tag: str = "build"):
-    #     if not tag_cfg:
-    #         return self
-    #     for tag, specs in tag_cfg.items():
-    #         for kw, item in match_keywords(scope, specs.get("keywords", [])):
-    #             self.assign_tags(item, [default_tag, tag, kw])
-    #         for item in specs.get("items", []):
-    #             if item in scope:
-    #                 self.assign_tags(item, [default_tag, tag])
-    #             else: 
-    #                 warnings.warn(f"[Skipped] '{item}' does not belong to match_scope")
-    #     return self
 
     def assign_tag(self, item: str, tag: str):
         self.tagged_items.setdefault(item, set()).add(tag)
