@@ -72,27 +72,6 @@ def add_cache_key(exif_args: list[str], prefix: str = ""):
         ]
     )
 
-def select_completed():
-    return Pipeline(
-        [
-            FilterRows(Condition("Status", "eq", "COMPLETED"))
-        ]
-    )
-
-def select_skipped():
-    return Pipeline(
-        [
-            FilterRows(Condition("Status", "eq", "SKIPPED"))
-        ]
-    )
-
-def select_failed():
-    return Pipeline(
-        [
-            FilterRows(Condition("Status", "eq", "ERROR"))
-        ]
-    )
-
 def tag_columns(ctx: Context):
     return Pipeline(
         [
@@ -118,7 +97,7 @@ def select_columns(ctx: Context):
             FilterCols(
                 CombinedFilter(
                     [
-                        NameFilter(["SourceFile", "File:FileName", "File:FileSize", "File:FileTypeExtension", "XML:HeadingPairs", "EXIF:GPSLatitude", "EXIF:GPSLongitude", "EXIF:Model"]),
+                        NameFilter(["FilePath", "File:FileName", "File:FileSize", "File:FileTypeExtension", "XML:HeadingPairs", "EXIF:GPSLatitude", "EXIF:GPSLongitude", "EXIF:Model"]),
                         TagFilter(["created_dt", "access_dt", "modify_dt"])
                     ]
                 )
@@ -156,7 +135,7 @@ def label_duplicates(ctx: Context):
     return Pipeline(
         [
             Compute(ColProcessor(pd.DataFrame.duplicated, keep=False), NameFilter("File:FileSize"), "IsSizeDuplicate"),
-            Compute(ElementProcessor(calc_full_hash), NameFilter("SourceFile"), "FileHash", where=Condition("IsSizeDuplicate", "eq", True)),
+            Compute(ElementProcessor(calc_full_hash), NameFilter("FilePath"), "FileHash", where=Condition("IsSizeDuplicate", "eq", True)),
             Compute(ColProcessor(pd.DataFrame.duplicated), NameFilter("FileHash"), "IsFileDuplicate", where=Condition("IsSizeDuplicate", "eq", True)),
             Transform(ColProcessor(pd.DataFrame.fillna, value=False), NameFilter("IsFileDuplicate")),
             Compute(ElementProcessor(label_duplicate), NameFilter("IsFileDuplicate"), "DuplicateLabel"),

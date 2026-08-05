@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from dataframe.context import Context
 from dataframe.write import Writer
 from dataframe.load import Loader
 from exiftool import ExifTool
@@ -54,6 +55,7 @@ class Config:
     data: Cache
     ref: Reference
     exif: Exif
+    context: Context
 
 # class PathComponents:
 #     def __init__(self):
