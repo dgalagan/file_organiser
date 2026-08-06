@@ -47,28 +47,21 @@ def add_file_path(prefix: str = ""):
         ]
     )
 
-def add_path_exists(prefix: str = ""):
-    return Pipeline(
-        [
-            Compute(ElementProcessor(os.path.exists), NameFilter(f"{prefix}FilePath"), dest_col=f"{prefix}PathExists"),
-        ]
-    )
-
 def add_files_stat(prefix: str = ""):
     return Pipeline(
             [
-                Compute(ElementProcessor(os.stat), NameFilter(f"{prefix}FilePath"), dest_col=f"{prefix}FileStat", where=Condition(f"{prefix}PathExists", "eq", True)),
-                Compute(ElementProcessor(lambda s: s.st_size), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}Size", where=Condition(f"{prefix}PathExists", "eq", True)),
-                Compute(ElementProcessor(lambda s: s.st_mtime), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}ModifiedAt", where=Condition(f"{prefix}PathExists", "eq", True)),
-                Compute(ElementProcessor(lambda s: s.st_dev), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}InodeDev", where=Condition(f"{prefix}PathExists", "eq", True)),
-                Compute(ElementProcessor(lambda s: s.st_ino), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}Inode", where=Condition(f"{prefix}PathExists", "eq", True)),
+                Compute(ElementProcessor(os.stat), NameFilter(f"{prefix}FilePath"), dest_col=f"{prefix}FileStat"),
+                Compute(ElementProcessor(lambda s: s.st_size), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}Size"),
+                Compute(ElementProcessor(lambda s: s.st_mtime), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}ModifiedAt"),
+                Compute(ElementProcessor(lambda s: s.st_dev), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}InodeDev"),
+                Compute(ElementProcessor(lambda s: s.st_ino), NameFilter(f"{prefix}FileStat"), dest_col=f"{prefix}Inode"),
             ]
         )
 
-def add_cache_key(exif_args: list[str], prefix: str = ""):
+def add_cache_key(prefix: str = ""):
     return Pipeline(
         [
-            Compute(RowProcessor(lambda row: calc_cache_key(row[f"{prefix}InodeDev"], row[f"{prefix}Inode"], exif_args)), NameFilter([f"{prefix}InodeDev", f"{prefix}Inode"]), dest_col=f"{prefix}CacheKey"),
+            Compute(RowProcessor(lambda row: calc_cache_key(row[f"{prefix}InodeDev"], row[f"{prefix}Inode"])), NameFilter([f"{prefix}InodeDev", f"{prefix}Inode"]), dest_col=f"{prefix}CacheKey"),
         ]
     )
 
