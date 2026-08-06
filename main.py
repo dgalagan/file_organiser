@@ -24,13 +24,12 @@ load_dotenv()
 #########        TO DO LIST      #########
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
-# [user input] instead of os.walk(), create recursion based on os.scandir()
-# [user input] self-reporting improvement
-# [user input] manage lowercase path cases in manual input
-# [user input] update menu for depth input provision(enter=skip)
-# [df] Rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
+# [scan_directories] instead of os.walk(), create recursion based on os.scandir()
+# [scan_directories] supply dir and files container externally
+# [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
-# i need a session id
+# [return] include missing files report
+# i need a session id ???
 
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 EXIFTOOL_ENV_VAR = "EXIF_PATH"
@@ -239,49 +238,46 @@ def restore(report_path: str, operation: Callable, config: Config) -> pd.DataFra
         completed = restore_plan.loc[restore_plan[operation.__name__].isna()]
         completed = add_files_stat(prefix="Dest").execute(completed)
         completed = add_cache_key(prefix="Dest").execute(completed)
-        
-        no_chg =  completed.loc[completed["CacheKey"] == completed["DestCacheKey"]].set_index("CacheKey")
-        chg =  completed.loc[completed["CacheKey"] != completed["DestCacheKey"]].set_index("CacheKey")
 
-        if not no_chg.empty:
-            # change FilePath for CacheKey
-            register_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
-            data_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
+        if not register_df.empty and data_df.empty:
+            no_chg =  completed.loc[completed["CacheKey"] == completed["DestCacheKey"]].set_index("CacheKey")
+            chg =  completed.loc[completed["CacheKey"] != completed["DestCacheKey"]].set_index("CacheKey")
 
-        if not chg.empty:
+            if not no_chg.empty:
+                # change FilePath for CacheKey
+                register_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
+                data_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
 
-            # copy data under DestCacheKey
-            register_upd = register_df[register_df.index.isin(chg.index)]
-            register_upd = register_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
-            register_upd = register_upd.set_index("DestCacheKey")
-            register_upd = register_upd.drop(columns=["CacheKey", "FilePath"])
-            register_upd = register_upd.rename(columns={"DestFilePath":"FilePath"})
-            register_df = pd.concat([register_df, register_upd])
+            if not chg.empty:
 
-            data_upd = data_df[data_df.index.isin(chg["CacheKey"])]
-            data_upd = data_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
-            data_upd = data_upd.set_index("DestCacheKey")
-            data_upd = data_upd.drop(columns=["CacheKey", "FilePath"])
-            data_upd = data_upd.rename(columns={"DestFilePath":"FilePath"})
-            data_df = pd.concat([data_df, data_upd])
+                # copy data under DestCacheKey
+                register_upd = register_df[register_df.index.isin(chg.index)]
+                register_upd = register_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
+                register_upd = register_upd.set_index("DestCacheKey")
+                register_upd = register_upd.drop(columns=["CacheKey", "FilePath"])
+                register_upd = register_upd.rename(columns={"DestFilePath":"FilePath"})
+                register_df = pd.concat([register_df, register_upd])
 
-            if operation.__name__ == "move":
-                # filter out stale cache entries
-                # register_df = register_df[~register_df.index.isin(chg["CacheKey"])]
-                # data_df = data_df[~data_df.index.isin(chg["CacheKey"])]
-                
-                # drop stale cache entries
-                register_df = register_df.drop(chg.index, axis="index")
-                data_df = data_df.drop(chg.index, axis="index")
+                data_upd = data_df[data_df.index.isin(chg["CacheKey"])]
+                data_upd = data_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
+                data_upd = data_upd.set_index("DestCacheKey")
+                data_upd = data_upd.drop(columns=["CacheKey", "FilePath"])
+                data_upd = data_upd.rename(columns={"DestFilePath":"FilePath"})
+                data_df = pd.concat([data_df, data_upd])
+
+                if operation.__name__ == "move":
+                    # drop stale cache entries
+                    register_df = register_df.drop(chg.index, axis="index")
+                    data_df = data_df.drop(chg.index, axis="index")
+
+            # save cache tables
+            config.register.save(register_df)
+            config.data.save(data_df)
 
         # remove emptied dirs
         if operation.__name__ == "move":
             dirs_df = remove_emptied_dirs(dirs_df)
-
-        # save cache tables
-        config.register.save(register_df)
-        config.data.save(data_df)
-
+        
         return completed
 
     else:
@@ -308,7 +304,7 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
     ref_df = config.ref.load().rename(uppercase_text, axis="index")
     ctx = config.context
 
-    # Processing scope
+    # Validate and select source roots
     src_roots_df = pd.DataFrame(
         {
             "DirPath": [src_roots] if isinstance(src_roots, str) else src_roots,
@@ -320,6 +316,8 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
     src_roots_df = prepare_dirs().execute(src_roots_df)
     src_roots_df = add_depth_metrics().execute(src_roots_df)
     selected_roots_df = select_processing_targets(src_roots_df)
+
+    # Extract files to process
     files_df, dirs_df = scan_directories(selected_roots_df)
 
     # Pre-processing
@@ -397,45 +395,46 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
         completed = operation_plan.loc[operation_plan[operation.__name__].isna()]
         completed = add_files_stat(prefix="Dest").execute(completed)
         completed = add_cache_key(prefix="Dest").execute(completed)
-        
-        no_chg =  completed.loc[completed["CacheKey"] == completed["DestCacheKey"]].set_index("CacheKey")
-        chg =  completed.loc[completed["CacheKey"] != completed["DestCacheKey"]].set_index("CacheKey")
 
-        if not no_chg.empty:
-            # change FilePath for CacheKey
-            register_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
-            data_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
+        if not register_df.empty and data_df.empty:
 
-        if not chg.empty:
+            no_chg =  completed.loc[completed["CacheKey"] == completed["DestCacheKey"]].set_index("CacheKey")
+            chg =  completed.loc[completed["CacheKey"] != completed["DestCacheKey"]].set_index("CacheKey")
 
-            # copy data under DestCacheKey
-            register_upd = register_df[register_df.index.isin(chg.index)]
-            register_upd = register_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
-            register_upd = register_upd.reset_index().set_index("DestCacheKey")
-            register_upd = register_upd.drop(columns=["index", "FilePath"])
-            register_upd = register_upd.rename(columns={"DestFilePath":"FilePath"})
-            register_df = pd.concat([register_df, register_upd])
+            if not no_chg.empty:
+                # change FilePath for CacheKey
+                register_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
+                data_df.loc[no_chg.index, "FilePath"] = no_chg["DestFilePath"]
 
-            data_upd = data_df[data_df.index.isin(chg.index)]
-            data_upd = data_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
-            data_upd = data_upd.reset_index().set_index("DestCacheKey")
-            data_upd = data_upd.drop(columns=["index", "FilePath"])
-            data_upd = data_upd.rename(columns={"DestFilePath":"FilePath"})
-            data_df = pd.concat([data_df, data_upd])
+            if not chg.empty:
 
-            if operation.__name__ == "move":
-                
-                # drop stale cache entries
-                register_df = register_df.drop(chg.index, axis="index")
-                data_df = data_df.drop(chg.index, axis="index")
+                # copy data under DestCacheKey
+                register_upd = register_df[register_df.index.isin(chg.index)]
+                register_upd = register_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
+                register_upd = register_upd.reset_index().set_index("DestCacheKey")
+                register_upd = register_upd.drop(columns=["index", "FilePath"])
+                register_upd = register_upd.rename(columns={"DestFilePath":"FilePath"})
+                register_df = pd.concat([register_df, register_upd])
+
+                data_upd = data_df[data_df.index.isin(chg.index)]
+                data_upd = data_upd.merge(chg[["DestCacheKey", "DestFilePath"]], left_index=True, right_index=True)
+                data_upd = data_upd.reset_index().set_index("DestCacheKey")
+                data_upd = data_upd.drop(columns=["index", "FilePath"])
+                data_upd = data_upd.rename(columns={"DestFilePath":"FilePath"})
+                data_df = pd.concat([data_df, data_upd])
+
+                if operation.__name__ == "move":
+                    # drop stale cache entries
+                    register_df = register_df.drop(chg.index, axis="index")
+                    data_df = data_df.drop(chg.index, axis="index")
+
+            # save cache tables
+            config.register.save(register_df)
+            config.data.save(data_df)
 
         # remove emptied dirs
         if operation.__name__ == "move":
             dirs_df = remove_emptied_dirs(dirs_df)
-
-        # save cache tables
-        config.register.save(register_df)
-        config.data.save(data_df)
 
         return completed
 
