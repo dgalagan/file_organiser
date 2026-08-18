@@ -27,14 +27,13 @@ class JSONWriter(Writer):
     orient: str
     force_ascii: bool
     indent: int
-    drop_na: bool
     file_extension: str = "json"
 
-    def save(self, df: pd.DataFrame, path: str) -> None:
+    def save(self, df: pd.DataFrame, path: str, dropna: bool = False) -> None:
         # check extension
         # create dir if not exists
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        if self.drop_na:
+        if dropna:
             payload = {str(row_id): row.dropna().to_dict() for row_id, row in df.iterrows()}
             with open(path, mode="w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=self.indent, ensure_ascii=self.force_ascii)

@@ -3,7 +3,7 @@ import os
 import shutil
 import stat
 from typing import Iterable, Iterator
-from utils.text import strip_text, split_text, count_letters, count_char
+from utils.text import strip_text, lstrip_text, split_text, count_letters, uppercase_text
 
 # General
 def get_drive(path: str) -> str:
@@ -89,26 +89,14 @@ def get_file_dir(path: str) -> str:
         raise FileNotFoundError(f"No such file: {path}")   
     return os.path.dirname(path)
 
-def get_file_extension(path: str, ext_separator: str = '.') -> str:
-    if is_not_file(path):
-        raise FileNotFoundError(f"No such file: {path}")
-    basename = os.path.basename(path)
-    if count_char(basename, ext_separator) > 0:
-        return os.path.splitext(basename)[-1]
-    else:
-        return ""
-
-def get_file_stem(path: str, ext_separator: str = '.') -> str:
-    if is_not_file(path):
-        raise FileNotFoundError(f"No such file: {path}")
-    basename = os.path.basename(path)
-    if count_char(basename, ext_separator) > 0:
-        return os.path.splitext(basename)[-2]
-    else:
-        return ""
-
-def get_file_name(path) -> str:
+def get_filename(path) -> str:
     return os.path.basename(path)
+
+def parse_filename(filename: str, separator: str = "."):
+    filename = strip_text(filename, char_to_remove=separator) # remove leading and trailing dots
+    stem, ext = os.path.splitext(filename)
+    ext = lstrip_text(ext, separator)
+    return stem, ext
 
 # Dirs specific
 def is_dir(path:str) -> bool:
@@ -123,17 +111,7 @@ def is_parent(path: str, of_path: str) -> bool:
     common_path = get_common_path([path, of_path]) 
     return path == common_path and path != of_path
 
-# def get_dir_depth(path: str) -> int: # depth starting index 0 vs 1 ?
-#     if is_not_dir(path):
-#         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
-    
-#     # abs_path = get_abs_path(path)
-    
-#     normalize_path = strip_text(path, char_to_remove=os.sep)
-    
-#     return get_path_length(normalize_path) - 1
-
-def subtree_depth(path: str) -> int:
+def tree_depth(path: str) -> int:
     if is_not_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     
@@ -142,7 +120,7 @@ def subtree_depth(path: str) -> int:
         for root, _ , _ in os.walk(path)
     )
 
-def iter_dir_hierarchy(path: str, max_relative_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
+def iter_dir_tree(path: str, max_relative_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
     
     if is_not_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")

@@ -1,7 +1,5 @@
 import datetime as dt
 import pandas as pd
-import os
-from reverse_geocoder import RGeocoder
 from utils.text import get_chars_pattern
 import hashlib
 
@@ -69,32 +67,6 @@ class DateParser:
     def get_summary(self):
         return self.summary
 
-def label_duplicate(value: bool) -> str:
-    return "duplicate" if value else "original"
-
-def get_worksheets_count(heading_pairs: list, target_headings: list[str] = []) -> int:
-    
-    if not isinstance(heading_pairs, list):
-        return None
-
-    for i, heading in enumerate(heading_pairs):
-        if heading in target_headings and i + 1 < len(heading_pairs):
-            return heading_pairs[i + 1]
-
-    return None
-
-def get_country(row: pd.Series, geocoder: RGeocoder, lat_col: str = "", lon_col: str = "") -> str:
-    lat, lon = row.get(lat_col), row.get(lon_col)
-    
-    if pd.isna(lat) or pd.isna(lon):
-        return None
-
-    return geocoder.query([(lat, lon)])[0]["cc"]
-
-def get_min_year(row: pd.Series) -> int:
-    timestamp = row.min()
-    return dt.datetime.fromtimestamp(timestamp).year
-
 # def calc_partial_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> dict:
 #     hash_func = getattr(hashlib, hash_algo)
 #     file_size = os.path.getsize(path)
@@ -125,10 +97,3 @@ def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> 
         return hash_func.hexdigest()
     except PermissionError:
         return ""
-    
-def build_path(row: pd.Series, root: str) -> pd.Series:
-    path_components = [str(value) for value in row if pd.notna(value)]
-    return os.path.join(root, *path_components)
-
-def fill_na_from_col(row: pd.Series, from_col: str = "", to_col: str = ""):
-    return row[from_col] if pd.isna(row[to_col]) else row[to_col]

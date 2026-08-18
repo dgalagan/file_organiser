@@ -13,10 +13,14 @@ class Predicate(ABC):
 @dataclass
 class Condition(Predicate):
     col: str
-    comparator: Literal["eq", "ne", "lt", "le", "gt", "ge"]
-    val: object
+    comparator: Literal["eq", "ne", "lt", "le", "gt", "ge", "isna", "notna"]
+    val: object = None
 
     def apply(self, df: pd.DataFrame) -> pd.Series:
+        if self.comparator == "isna":
+            return df[self.col].isna()
+        if self.comparator == "notna":
+            return df[self.col].notna()
         return getattr(operator, self.comparator)(df[self.col], self.val)
 
 @dataclass
@@ -38,8 +42,9 @@ class And(Predicate):
         for cond in self.conditions:
             mask &= cond.apply(df)
         return mask
-    
-class All(Predicate):
+
+@dataclass
+class AllRows(Predicate):
 
     def apply(self, df: pd.DataFrame) -> pd.Series:
         return pd.Series(True, index=df.index)

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pandas as pd
 from typing import Iterator
 from dataframe.context import Context
+import warnings
 
 def match_keywords(items: list[str], keywords: list[str]) -> Iterator[tuple[str, str]]:
     for kw in keywords:
@@ -30,11 +31,26 @@ class NameFilter(ColFilter):
             self.cols = [self.cols]
 
     def select(self, df: pd.DataFrame, ctx: Context) -> list[str]:
-        return [col for col in self.cols if col in df.columns]
+        selected, missing = [], []
+
+        for col in self.cols:
+            if col in df.columns:
+                selected.append(col)
+            else:
+                missing.append(col)
+
+        if missing:
+            warnings.warn(f"NameFilter: columns not in DataFrame: {missing}")
+
+        return selected
 
 @dataclass
 class KeywordFilter(ColFilter):
-    keywords: list[str]
+    keywords: list[str] | str
+
+    def __post_init__(self):
+        if isinstance(self.keywords, str):
+            self.keywords = [self.keywords]
     
     def select(self, df: pd.DataFrame, ctx: Context) -> list[str]:
         seen, out = set(), []
@@ -46,7 +62,7 @@ class KeywordFilter(ColFilter):
 
 @dataclass
 class TagFilter(ColFilter):
-    tags: list[str]
+    tags: list[str] | str
 
     def select(self, df: pd.DataFrame, ctx: Context) -> list[str]:
         return [col for col in ctx.store.find_items(self.tags) if col in df.columns]
@@ -61,6 +77,9 @@ class CombinedFilter(ColFilter):
             for col in filter.select(df, ctx):
                 if col not in selected:
                     selected.append(col)
+
+        # return all if nothing selected
+
         return selected
 
 @dataclass

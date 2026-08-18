@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from dataframe.context import Context
-from dataframe.write import Writer
-from dataframe.load import Loader
+from dataframe.write import JSONWriter
+from dataframe.load import JSONLoader
 from exiftool import ExifTool
 import json
 import os
@@ -16,23 +16,55 @@ def get_batches(files: list[str], batch_size: int) -> list[list[str]]:
 @dataclass
 class Cache:
     path: str
-    clear_cache: bool
-    writer: Writer
-    loader: Loader
+    loader: JSONLoader
+    writer: JSONWriter
+    data: pd.DataFrame = None
 
-    def load(self) -> pd.DataFrame:
-        if self.clear_cache or not os.path.exists(self.path):
+    def __post_init__(self):
+        if not os.path.exists(self.path):
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             self.writer.save(pd.DataFrame(), self.path)
-        return self.loader.load(self.path)
 
-    def save(self, df: pd.DataFrame) -> None:
-        self.writer.save(df, self.path)
+    def _require_loaded(self) -> None:
+        if self.data is None:
+            raise ValueError("Cache not loaded")
+
+    def _require_data(self) -> None:
+        self._require_loaded()
+        if self.data.empty:
+            raise ValueError("Cache is empty")
+
+    def load(self) -> pd.DataFrame:
+        self.data = self.loader.load(self.path)
+
+    def clear(self) -> pd.DataFrame:
+        self.data = pd.DataFrame()
+
+    def add(self, new_entries: pd.DataFrame) -> None:
+        self._require_loaded()
+        self.data = pd.concat([self.data, new_entries])
+
+    def update(self, changed_entries: pd.DataFrame):
+        self._require_data()
+        self.data.loc[changed_entries.index, changed_entries.columns] = changed_entries
+
+    def clone(self, src_to_dest: dict) -> None:
+        self._require_data()
+        cloned = self.data.loc[list(src_to_dest.keys())].rename(index=src_to_dest)
+        self.add(cloned)
+
+    def delete(self, entry_ids: list) -> None:
+        self._require_data()
+        self.data = self.data.drop(index=entry_ids, errors="ignore")
+
+    def save(self, dropna: bool = False) -> None:
+        self._require_loaded()
+        self.writer.save(self.data, self.path, dropna=dropna)
 
 @dataclass
 class Reference:
     path: str
-    loader: Loader
+    loader: JSONLoader
 
     def load(self) -> pd.DataFrame:
         return self.loader.load(self.path)
@@ -52,7 +84,7 @@ class Exif:
 @dataclass
 class Config:
     register: Cache
-    data: Cache
+    metadata: Cache
     ref: Reference
     exif: Exif
     context: Context

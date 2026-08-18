@@ -8,13 +8,11 @@ class TagStore:
             return set()
         return set().union(*self.tagged_items.values())
 
-    def assign_tag(self, item: str, tag: str):
-        self.tagged_items.setdefault(item, set()).add(tag)
-        return self
-
-    def assign_tags(self, item: str, tags: list[str]):
+    def assign_tags(self, item: str, tags: list[str] | str):
+        if isinstance(tags, str):
+            tags = [tags]
         for tag in tags:
-            self.assign_tag(item, tag)
+            self.tagged_items.setdefault(item, set()).add(tag)
         return self
     
     def rename_tag(self, old_tag: str, new_tag: str):
@@ -26,7 +24,7 @@ class TagStore:
                 tags.add(new_tag)
         return self
 
-    def find_items(self, tags: str | list[str]) -> list[str]:
+    def find_items(self, tags: list[str] | str) -> list[str]:
         if isinstance(tags, str):
             tags = [tags]
         wanted = set(tags)
