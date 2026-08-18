@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from dataframe.context import Context
 from dataframe.write import JSONWriter
 from dataframe.load import JSONLoader
+from dataframe.predicate import Predicate, Condition, And, Or, AllRows
 from exiftool import ExifTool
 import json
 import os
@@ -42,6 +43,9 @@ class Cache:
 
     def add(self, new_entries: pd.DataFrame) -> None:
         self._require_loaded()
+        overlap = new_entries.index.intersection(self.data.index)
+        if not overlap.empty:
+            raise ValueError(f"New entries overlap with existing")
         self.data = pd.concat([self.data, new_entries])
 
     def update(self, changed_entries: pd.DataFrame):
@@ -88,33 +92,4 @@ class Config:
     ref: Reference
     exif: Exif
     context: Context
-
-# class PathComponents:
-#     def __init__(self):
-#         self.component_structure: dict[str, list[str]] = {
-#             "General": ["DuplicateLabel", "FileCategory", "CreationYear", "FileExtension"],
-#             "Image": ["CameraModel", "ImageCountry"],
-#             "Data-Excel": ["WorksheetCount"]
-#         }
-#         self.component_aliases: dict[str, str] = {
-#             "DuplicateLabel": "DuplicateLabel",
-#             "FileCategory": "category",
-#             "CreationYear": "Year",
-#             "FileExtension": "File:FileTypeExtension",
-#             "CameraModel": "EXIF:Model",
-#             "ImageCountry": "Country",
-#             "WorksheetCount": "CountWorksheets"
-#         }
-
-#     def reorder(self, group: str, component: str, new_position: int):
-#         group_components = self.component_structure[group]
-#         group_components[group].remove(component)
-#         group_components[group].insert(new_position, component)
-#         return self
-
-#     def remove(self, group: str, component: str):
-#         self.component_structure[group].remove(component)
-#         return self
-
-#     def resolve(self) -> list[str]:
-#         return [self.component_aliases[component] for components in self.component_structure.values() for component in components]
+    # filter: Predicate

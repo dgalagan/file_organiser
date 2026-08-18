@@ -28,11 +28,13 @@ load_dotenv()
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
+
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
 # [scan_directories] supply dir and files container externally
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
+# [config] add filter rows func into config
 
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 EXIFTOOL_ENV_VAR = "EXIF_PATH"
@@ -40,6 +42,7 @@ EXIFTOOL_EXECUTABLE = "exiftool"
 CACHE_DIR = "cache"
 CACHE_METADATA = "metadata.json"
 CACHE_REGISTER = "register.json"
+REGISTER_COLS = [Cols.FILE_PATH, Cols.FILE_NAME, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]
 
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -175,10 +178,10 @@ def restore(report_path: str, operation: Callable, config: Config) -> pd.DataFra
             return pd.DataFrame()
 
     # Load cache
-    register = config.register
-    metadata = config.metadata
-    register.load()
-    metadata.load()
+    register, metadata = config.register, config.metadata
+
+    for cache in (register, metadata):
+        cache.load()
 
     files_df = pd.read_csv(report_path)[[dest_col(Cols.FILE_ID), dest_col(Cols.FILE_PATH), Cols.FILE_PATH]]
     # files_df = report_df[[dest_col(Cols.FILE_ID), dest_col(Cols.FILE_PATH), Cols.FILE_PATH]]
@@ -244,15 +247,14 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
             return pd.DataFrame()
 
     # Load cache
-    register = config.register
-    metadata = config.metadata
+    register, metadata = config.register, config.metadata
 
-    if clear_cache:
-        register.clear()
-        metadata.clear()
-    else:
-        register.load()
-        metadata.load()
+    for cache in (register, metadata):
+        if clear_cache:
+            cache.clear()
+        else:
+            cache.load()
+
     # Load ref
     ref_df = config.ref.load().rename(uppercase_text, axis="index").rename(columns={"category": Cols.FILE_CATEGORY})
     # Load context
@@ -293,39 +295,35 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
     new_files_df = files_df[~files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
     known_files_df = files_df[files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
 
-    if not known_files_df.empty:
+    changed_files_df = None
 
+    if not known_files_df.empty:
         date_change = register.data.loc[known_files_df.index, Cols.MODIFIED_AT] != known_files_df[Cols.MODIFIED_AT] # risky check for float type
         size_change = register.data.loc[known_files_df.index, Cols.SIZE] != known_files_df[Cols.SIZE]
         args_change = register.data.loc[known_files_df.index, Cols.EXIF_ARGS] != known_files_df[Cols.EXIF_ARGS]
         changed_files_df = known_files_df.loc[date_change | size_change | args_change]
 
-        if not changed_files_df.empty:
-            changed_files = changed_files_df[Cols.FILE_PATH].to_list()
-            exif_results = list(tqdm(config.exif.extract(changed_files), total=len(changed_files), desc=f"{"Extracting exif metadata (changed)":<40}", bar_format=TQDM_BAR))
-            exif_df = pd.DataFrame(exif_results)
-            exif_df["SourceFile"] = exif_df["SourceFile"].apply(os.path.normpath)
-            exif_df = exif_df.merge(changed_files_df.reset_index()[[Cols.FILE_PATH, Cols.FILE_ID]], how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
-            exif_df = exif_df.drop(columns="SourceFile")
-            exif_df = exif_df.set_index(Cols.FILE_ID)
-            # Update cache
-            register.update(changed_files_df[[Cols.FILE_PATH, Cols.FILE_NAME, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]])
-            metadata.update(exif_df)
-
-    if not new_files_df.empty:
-        new_files = new_files_df[Cols.FILE_PATH].to_list()
-        exif_results = list(tqdm(config.exif.extract(new_files), total=len(new_files), desc=f"{"Extracting exif metadata (new)":<40}", bar_format=TQDM_BAR))
+    to_exif_df = pd.concat([new_files_df, changed_files_df])
+    if not to_exif_df.empty:
+        files_to_exif = to_exif_df[Cols.FILE_PATH].to_list()
+        exif_results = list(tqdm(config.exif.extract(files_to_exif), total=len(files_to_exif), desc=f"{"Extracting exif metadata":<40}", bar_format=TQDM_BAR))
         exif_df = pd.DataFrame(exif_results)
         exif_df["SourceFile"] = exif_df["SourceFile"].apply(os.path.normpath)
-        exif_df = exif_df.merge(new_files_df.reset_index()[[Cols.FILE_PATH, Cols.FILE_ID]], how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
+        exif_df = exif_df.merge(to_exif_df.reset_index()[[Cols.FILE_PATH, Cols.FILE_ID]], how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
         exif_df = exif_df.drop(columns="SourceFile")
         exif_df = exif_df.set_index(Cols.FILE_ID)
-        # Update cache
-        register.add(new_files_df[[Cols.FILE_PATH, Cols.FILE_NAME, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]])
-        metadata.add(exif_df)
+
+    # Update cache
+    if not changed_files_df.empty:
+        register.update(changed_files_df[REGISTER_COLS])
+        metadata.update(exif_df.loc[changed_files_df.index])
+
+    if not new_files_df.empty:
+        register.add(new_files_df[REGISTER_COLS])
+        metadata.add(exif_df.loc[new_files_df.index])
 
     # Select exif metadata
-    metadata_df = tag_columns(ctx, name_tags=TagsMapping.NAME, keyword_tags=TagsMapping.KEYWORD,).execute(metadata.data)
+    metadata_df = tag_columns(ctx, name_tags=TagsMapping.NAME, keyword_tags=TagsMapping.KEYWORD).execute(metadata.data)
     selected_metadata_df = select_columns(
         ctx,
         names=[Cols.FILE_TYPE_EXT, Cols.XML_HEADING_PAIRS, Cols.EXIF_GPS_LATITUDE, Cols.EXIF_GPS_LONGITUDE, Cols.EXIF_MODEL],
@@ -339,6 +337,7 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
     files_df = files_df.merge(ref_df[Cols.FILE_CATEGORY], how="left", left_on=Cols.CONSOLIDATED_EXT, right_index=True)
     files_df = assemble_dest_dir(ctx, dest_root, dest_structure).execute(files_df)
     files_df = assemble_file_path(prefix="Dest").execute(files_df)
+
     # Execute operation
     tqdm.pandas(desc=f"{f"{operation.__name__} files into new structure":<40}", bar_format=TQDM_BAR)
     files_df[operation.__name__] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[dest_col(Cols.FILE_PATH)]), axis=1)
@@ -401,10 +400,10 @@ if __name__ == "__main__":
         # src_roots=["D:\\OneDrive"],
         src_roots=["D:\\MyOrganizedFiles"],
         dest_root="D:\\MyOrganizedFiles",
-        dest_structure=[dup_label_col(Cols.FILE_HASH), Cols.FILE_CATEGORY, Cols.EARLIEST_YEAR, Cols.EXIF_MODEL, Cols.IMAGE_COUNTRY, Cols.WORKSHEETS_COUNT],
+        dest_structure=[dup_label_col(Cols.FILE_HASH), Cols.EARLIEST_YEAR, Cols.FILE_CATEGORY, Cols.EXIF_MODEL, Cols.IMAGE_COUNTRY, Cols.WORKSHEETS_COUNT],
         operation=move,
         config=config,
-        clear_cache=False
+        clear_cache=False,
     )
 
     datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
