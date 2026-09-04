@@ -34,7 +34,7 @@
                 "D0CF11E0A1B11AE1"
             ]
         },
-        "category": "",
+        "category": "Other",
         "description": "",
         "software": ""
     },
@@ -46,7 +46,7 @@
         },
         "software": "",
         "description": "",
-        "category": ""
+        "category": "Other"
     },
     "ppt": {
         "magic_number": {
@@ -87,7 +87,7 @@
         },
         "software": "",
         "description": "",
-        "category": ""
+        "category": "Other"
     },
     "xls": {
         "magic_number": {
@@ -129,7 +129,7 @@
         },
         "software": "",
         "description": "",
-        "category": ""
+        "category": "Other"
     },
     "pdf": {
         "magic_number": {
@@ -232,13 +232,13 @@
         "magic_number": {},
         "software": "Macrium Reflect",
         "description": "Disk Image",
-        "category": "System Backup"
+        "category": "SystemBackup"
     },
     "cached": {
         "magic_number": {},
         "software": "Games",
         "description": "Cache File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "tmp": {
         "magic_number": {},
@@ -262,7 +262,7 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Initialization File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "7z": {
         "magic_number": {},
@@ -274,13 +274,13 @@
         "magic_number": {},
         "software": "Quiz Interactive App",
         "description": "Authorware Runtime",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "act": {
         "magic_number": {},
         "software": "Games",
         "description": "Other",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "axd": {
         "magic_number": {},
@@ -298,7 +298,7 @@
         "magic_number": {},
         "software": "Various",
         "description": "Binary File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "bmp": {
         "magic_number": {},
@@ -310,19 +310,19 @@
         "magic_number": {},
         "software": "Linux",
         "description": "Boot Configuration",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "c32": {
         "magic_number": {},
         "software": "Linux",
         "description": "Linux System File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "cat": {
         "magic_number": {},
         "software": "Windows",
         "description": "Security Catalog File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "cfg": {
         "magic_number": {},
@@ -340,7 +340,7 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Executable Command",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "conf": {
         "magic_number": {},
@@ -352,7 +352,7 @@
         "magic_number": {},
         "software": "Games",
         "description": "CRI Middleware Package File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "crc": {
         "magic_number": {},
@@ -370,7 +370,7 @@
         "magic_number": {},
         "software": "Any Text Editor",
         "description": "Cascading Style Sheet",
-        "category": "Web Page Style"
+        "category": "Web"
     },
     "csv": {
         "magic_number": {},
@@ -382,7 +382,7 @@
         "magic_number": {},
         "software": "Games",
         "description": "Data File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "db": {
         "magic_number": {},
@@ -394,7 +394,7 @@
         "magic_number": {},
         "software": "Linux",
         "description": "Linux Shortcut / Launcher",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "djvu": {
         "magic_number": {},
@@ -406,13 +406,13 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Dynamic Link Library",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "dotm": {
         "magic_number": {},
         "software": "Microsoft Word",
         "description": "Microsoft Word Macro-Enabled Template",
-        "category": "Word Document"
+        "category": "Documents-Word"
     },
     "download": {
         "magic_number": {},
@@ -436,13 +436,13 @@
         "magic_number": {},
         "software": "OS Inspection",
         "description": "Event Trace Log",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "exe": {
         "magic_number": {},
         "software": "Windows",
         "description": "Executable Command",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "flac": {
         "magic_number": {},
@@ -490,19 +490,19 @@
         "magic_number": {},
         "software": "Web Browsers",
         "description": "HyperText Markup",
-        "category": "Web Page"
+        "category": "Web"
     },
     "html": {
         "magic_number": {},
         "software": "Web Browsers",
         "description": "HyperText Markup Language",
-        "category": "Web Page"
+        "category": "Web"
     },
     "idx": {
         "magic_number": {},
         "software": "Git",
         "description": "Pack index file",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "iif": {
         "magic_number": {},
@@ -514,7 +514,7 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Setup Information File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "ipynb": {
         "magic_number": {},
@@ -556,13 +556,13 @@
         "magic_number": {},
         "software": "Exam Interactive App",
         "description": "Language Resource File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "lnk": {
         "magic_number": {},
         "software": "Windows",
         "description": "Windows Shortcut",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "loaded_0": {
         "magic_number": {},
@@ -586,7 +586,7 @@
         "magic_number": {},
         "software": "Other",
         "description": "MP3 link",
-        "category": "URL"
+        "category": "Web"
     },
     "m4a": {
         "magic_number": {},
@@ -616,7 +616,7 @@
         "magic_number": {},
         "software": "Games",
         "description": "Compressed module music format",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "mov": {
         "magic_number": {},
@@ -652,13 +652,13 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Microsoft Installer",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "nfo": {
         "magic_number": {},
         "software": "Windows",
         "description": "System Information File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "npy": {
         "magic_number": {},
@@ -688,7 +688,7 @@
         "magic_number": {},
         "software": "Git",
         "description": "Packfile",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "parquet": {
         "magic_number": {},
@@ -766,13 +766,13 @@
         "magic_number": {},
         "software": "Quiz Interactive App",
         "description": "Other",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "qsz": {
         "magic_number": {},
         "software": "Quiz Interactive App",
         "description": "Other",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "rar": {
         "magic_number": {},
@@ -784,25 +784,25 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Microsoft Remote Desktop",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "reg": {
         "magic_number": {},
         "software": "Windows",
         "description": "Windows Registry File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "registry": {
         "magic_number": {},
         "software": "Windows",
         "description": "Windows Registry",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "rev": {
         "magic_number": {},
         "software": "Git",
         "description": "Reverse index file",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "rtf": {
         "magic_number": {},
@@ -820,7 +820,7 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Windows Search",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "sfr": {
         "magic_number": {},
@@ -838,7 +838,7 @@
         "magic_number": {},
         "software": "Games",
         "description": "Signature File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "sh": {
         "magic_number": {},
@@ -868,7 +868,7 @@
         "magic_number": {},
         "software": "Windows",
         "description": "Windows System File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "thm": {
         "magic_number": {},
@@ -904,7 +904,7 @@
         "magic_number": {},
         "software": "Quiz Interactive App",
         "description": "Plugin",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "xlsb": {
         "magic_number": {},
@@ -928,13 +928,13 @@
         "magic_number": {},
         "software": "Linux",
         "description": "XZ Compressed File",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "xzm": {
         "magic_number": {},
         "software": "Linux",
         "description": "Linux System Module",
-        "category": "Application Specific"
+        "category": "Application"
     },
     "yml": {
         "magic_number": {},

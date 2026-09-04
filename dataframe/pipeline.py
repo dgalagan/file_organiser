@@ -1,102 +1,100 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import pandas as pd
-from dataframe.context import Context
-from dataframe.col_filter import ColFilter
+from dataframe.col_filter import ColumnFilter, AllCols
 from dataframe.processor import Processor
 from dataframe.predicate import Predicate
+from core.tagstore import TagStore
 
 @dataclass
 class Step(ABC):
     @abstractmethod
-    def run(self, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
-
-# Tag Set Up
-@dataclass
-class AssignTags(Step):
-    col_filter: ColFilter
-    tags: list[str] | str
-
-    def run(self, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
-        cols = self.col_filter.select(df, ctx)
-        for col in cols:
-            ctx.store.assign_tags(col, self.tags)
-        return df
 
 # Filter
 @dataclass
 class FilterCols(Step):
-    col_filter: ColFilter
+    col_filter: ColumnFilter
 
-    def run(self, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
-        return self.col_filter.filter(df, ctx)
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
+        cols = self.col_filter.select(df.columns)
+        return df[cols]
 
 # Filter
 @dataclass
 class FilterRows(Step):
     predicate: Predicate
 
-    def run(self, df: pd.DataFrame, ctx: Context) -> pd.DataFrame:
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
         mask = self.predicate.apply(df)
         return df[mask]
 
-# Transform
-# @dataclass
-# class Transform(Step):
-#     processor: Processor
-#     col_filter: ColFilter
-#     where: Predicate | None = None
+# Expand
+@dataclass
+class ExpandDict(Step):
+    col: str
+    where: Predicate = None
 
-#     def run(self, df: pd.DataFrame, ctx: Context):
-#         cols = self.col_filter.select(df, ctx)
-#         # update values in tag store if available
-#         if ctx.store is not None:
-#             for col in cols:
-#                 ctx.store.assign_tag(col, "transformed")
-#         # init Series[bool] for row filtering
-#         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
-#         # execute calculation
-#         result = self.processor.process(df.loc[mask, cols])
-#         df[cols] = result.reindex(df.index, fill_value=None)
-#         return df
+    def run(self, df: pd.DataFrame):
+        # init Series[bool] for row filtering
+        mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
+        # execute calculation
+        result = pd.json_normalize(df.loc[mask, self.col])
+        # assign results
+        df[result.columns] = None
+        df.loc[mask, result.columns] = result
+        df = df.drop(columns=self.col)
+        return df
+
+# Label
+@dataclass
+class Label(Step):
+    dest_col: str
+    value: str # value type probably should be any
+    where: Predicate = None
+
+    def run(self, df: pd.DataFrame):
+        mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
+        df.loc[mask, self.dest_col] = self.value
+        return df
 
 # Compute
 @dataclass
 class Compute(Step):
     processor: Processor
-    col_filter: ColFilter
-    dest_col: str | None = None
-    where: Predicate | None = None
+    col_filter: ColumnFilter = field(default_factory=AllCols)
+    dest_col: str = None
+    where: Predicate = None
+    tagstore: TagStore = None
 
-    def run(self, df: pd.DataFrame, ctx: Context):
-        cols = self.col_filter.select(df, ctx)
-        # update values in tag store if available
-        if ctx.store is not None:
-            ctx.store.assign_tags(self.dest_col, "new")
+    def run(self, df: pd.DataFrame):
+        cols = self.col_filter.select(df.columns)
         # init Series[bool] for row filtering
         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
         # execute calculation
         result = self.processor.process(df.loc[mask, cols])
-        # print(f"Processor{type(self.processor).__name__} Incoming{type(df.loc[mask, cols])}, Outcoming{type(result)}")
         # assign results
         if self.dest_col:
             if self.dest_col not in df.columns:
                 df[self.dest_col] = None
             df.loc[mask, self.dest_col] = result.squeeze() # dtype misalignment issue
+            if self.tagstore:
+                self.tagstore.assign_tag([self.dest_col], "new")
             # df[self.dest_col] = result.reindex(df.index, fill_value=None)
         else:
             df[cols] = None
             df.loc[mask, cols] = result
+            if self.tagstore:
+                self.tagstore.assign_tag(cols, "transformed")
             # df[cols] = result.reindex(df.index, fill_value=None)
         return df
 
 @dataclass
 class Pipeline:
     steps: list[Step]
-    context: Context = field(default_factory=Context)
 
-    def execute(self, df: pd.DataFrame) -> pd.DataFrame:
+    def run(self, df: pd.DataFrame) -> pd.DataFrame:
         for step in self.steps:
-            df = step.run(df, self.context)
+            df = step.run(df)
         return df

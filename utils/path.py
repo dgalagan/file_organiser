@@ -1,7 +1,6 @@
 import ctypes
 import os
 import shutil
-import stat
 from typing import Iterable, Iterator
 from utils.text import strip_text, lstrip_text, split_text, count_letters, uppercase_text
 
@@ -98,12 +97,37 @@ def parse_filename(filename: str, separator: str = "."):
     ext = lstrip_text(ext, separator)
     return stem, ext
 
+def move(src_path: str, dest_path: str):
+    try:
+        if os.path.exists(dest_path):
+            raise RuntimeError("File already exists at destination")
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        shutil.move(src_path, dest_path)
+        if os.path.exists(src_path):
+            raise RuntimeError("Source file still exists")
+    except Exception as e:
+        return e
+
+def copy(src_path: str, dest_path: str):
+    try:
+        if os.path.exists(dest_path):
+            raise RuntimeError("File already exists at destination")
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        shutil.copy2(src_path, dest_path)
+    except Exception as e:
+        return e
+
 # Dirs specific
 def is_dir(path:str) -> bool:
     return os.path.isdir(path)
 
 def is_not_dir(path:str) -> bool:
     return not os.path.isdir(path)
+
+def is_empty(path:str) -> bool:
+    if is_not_dir(path):
+        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
+    return not os.listdir(path)
 
 def is_parent(path: str, of_path: str) -> bool:
     if is_not_dir(path) or is_not_dir(of_path):
@@ -133,17 +157,3 @@ def iter_dir_tree(path: str, max_relative_depth: int = 0) -> Iterator[tuple[int,
             dirs[:] = []
         
         yield relative_depth, root, files
-
-def remove_readonly(func, path, _):
-    "Clear the readonly bit and reattempt the removal"
-    os.chmod(path, stat.S_IWRITE)
-    func(path)
-
-def clean_dir(path: str) -> None:
-    dir_content = os.listdir(path)
-    for obj_name in dir_content:
-        obj_path = os.path.join(path, obj_name)
-        if is_file(obj_path):
-            os.remove(obj_path)
-        elif is_dir(obj_path):
-            shutil.rmtree(obj_path, onexc=remove_readonly)

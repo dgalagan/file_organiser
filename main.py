@@ -1,26 +1,27 @@
-import pandas as pd
 from enum import StrEnum, auto
-from core.pipelines import dup_label_col, dest_col, prepare_dirs, add_depth_metrics, assemble_file_path, add_stat, tag_columns, select_columns, consolidate_file_ext, exclude_rows, assemble_dest_dir
-from cli.tokens import Icon, Separator
-from cli.components import Info, Prompt
-from core.transformation import DateParser
+from core.pipelines import validate_dirs, add_depth_metrics, assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
+from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
+from cli.tokens import CYAN, RESET
+from core.parser import DateParser
 from core.config import Config, Cache, Exif, Reference
-from constants import TagsMapping, Tags, Cols
-from dataframe.context import Context
+from core.categories import Category, CategorySelection
+from core.tagstore import TagStore
+from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
+from dataframe.pipeline import FilterRows
+from dataframe.col_filter import ColumnFilter, NameFilter, KeywordFilter, CombinedFilter
+from dataframe.predicate import Condition, And
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
-from dotenv import load_dotenv
 from datetime import datetime
 import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
-from typing import Callable
-from utils.path import iter_dir_tree, is_parent, depth_from_dir
+from typing import Callable, Literal
+from utils.path import iter_dir_tree, is_parent, depth_from_dir, move, copy
 from utils.text import uppercase_text
-
-load_dotenv()
+from collections import defaultdict
 
 ###############################
 ############ TO-DO ############
@@ -28,21 +29,33 @@ load_dotenv()
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
-
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
 # [scan_directories] supply dir and files container externally
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
-# [config] add filter rows func into config
 
+EXIFTOOL_PATH = "D:/Development/Software/Projects/file_organiser/bin/exif/exiftool(-k).exe"
+EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
+EXIFTOOL_ENCOODING = "utf-8"
+EXIFTOOL_BATCH_SIZE = 50
+META_DATE_TAGS: list[str] = [Tags.CREATE_DT, Tags.ACCESS_DT, Tags.MODIFY_DT]
+META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
+    Tags.CREATE_DT: CombinedFilter([
+        NameFilter([Cols.ID3_YEAR, Cols.EXE_TIMESTAMP, Cols.XMP_TIMESTAMP, Cols.PNG_DATETIME, Cols.COMPOSITE_DATETIME, Cols.QT_PURCHASE_DATE]),
+        KeywordFilter(["createdate", "creationdate", "createddatetime", "datetimeoriginal", "datetimedigitized", "datetimecreated"])
+        # "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
+    ]),
+    Tags.ACCESS_DT: KeywordFilter(["accessdate", "lastplayed", "lastprinted"]),
+    Tags.MODIFY_DT: KeywordFilter(["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]),
+}
+DIR_SCHEMA = {
+    "Universal": [("FileHashDupLabel", True), ("FileCategory", True), ("EarliestYear", True)],
+    "Image": [("ImageCountry", True), ("EXIF:Model", True)],
+    "Data-Excel": [("WorksheetsCount", True)]
+}
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
-EXIFTOOL_ENV_VAR = "EXIF_PATH"
-EXIFTOOL_EXECUTABLE = "exiftool"
-CACHE_DIR = "cache"
-CACHE_METADATA = "metadata.json"
-CACHE_REGISTER = "register.json"
-REGISTER_COLS = [Cols.FILE_PATH, Cols.FILE_NAME, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]
+INDENT = "  "
 
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -52,13 +65,11 @@ class MenuActions(StrEnum):
     FAILED = auto()
     RESTART = auto()
 
-def find_exiftool() -> str:
-    path = os.environ.get(EXIFTOOL_ENV_VAR) or shutil.which(EXIFTOOL_EXECUTABLE)
-    if not path:
-        raise RuntimeError("ExifTool not found")
-    return path
+###############################
+########### HELPERS ###########
+###############################
 
-def set_processing_depth(branch_depth: int) -> tuple[int | None, StrEnum]: # dependency: select_processing_targets()
+def set_processing_depth(root: str, branch_depth: int) -> tuple[int | None, StrEnum]: # dependency: select_processing_targets()
     
     if not isinstance(branch_depth, int) or isinstance(branch_depth, bool):
         raise TypeError(f"branch_depth must be an int, got {type(branch_depth).__name__}")
@@ -66,26 +77,26 @@ def set_processing_depth(branch_depth: int) -> tuple[int | None, StrEnum]: # dep
     if branch_depth < 0:
         raise ValueError(f"branch_depth must be non-negative, got {branch_depth}")
 
-    depth_range = f"0-{branch_depth}" if branch_depth else "0"
+    depth_level = f"0-{branch_depth}" if branch_depth else "0"
+
+    # path truncation
 
     while True:
         try:
-            depth_input = input(Prompt.ELEMENTS["depth"].generate(range=depth_range))
+            print(f"{INDENT}{Prompt.ELEMENTS["depth_input"].build(dir_path=root, num=depth_level)}")
+            depth_input = input(f"{INDENT}{INDENT}  \\__depth: ")
             if depth_input == "":
-                print(f"Skipping this path")
                 return None, MenuActions.SKIP
             depth_input = int(depth_input)
             if 0 <= depth_input <= branch_depth:
                 return depth_input, MenuActions.SUCCESS
-            print(Warning.ELEMENTS["invalid_input"].generate())
+            print(Warnings.ELEMENTS["invalid_input"].build())
             continue
-
         except ValueError:
-            print(Warning.ELEMENTS["invalid_input"].generate())
+            print(Warnings.ELEMENTS["invalid_input"].build())
             continue
-
         except KeyboardInterrupt:
-            print(f"Depth input interrupted")
+            print()
             return None, MenuActions.INTERRUPT
 
 def select_roots(df: pd.DataFrame) -> pd.DataFrame: # dependency: set_processing_depth()
@@ -94,82 +105,162 @@ def select_roots(df: pd.DataFrame) -> pd.DataFrame: # dependency: set_processing
     # map, apply in the DF Processor returns DF with irrelevant Col name that i reassign to relevant. Potential issues with dtypes
     
     # Sort values from highest to lowest level dirs
-    df = df.sort_values("RootDepth", ascending=True)
-    
+    df = df.sort_values(Cols.ROOT_DEPTH, ascending=True)
+    df[Cols.ROOT_SELECTED] = False
+
     pending = list(df.index)
-    skipped = set()
+    skipped_child = []
+    summary = []
+    print("\n".join(["Select processing depth per directory", f"{INDENT}[0-N]    Set processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
     for pos, row_id in enumerate(pending):
-        if row_id in skipped:
+        if row_id in skipped_child:
             continue
-        src_root = df.loc[row_id, "SrcRoot"]
-        tree_depth = df.loc[row_id, "RootTreeDepth"].item()
-        # CLI element
-        print("\n".join([Separator.DASH.repeat(100), Info.ELEMENTS["processing"].generate(dir_path=src_root), Icon.DOWNARROW.repeat(3)]))
+        src_root = df.loc[row_id, Cols.ROOT]
+        tree_depth = int(df.loc[row_id, Cols.ROOT_TREE_DEPTH])
         # Get user input on required processing depth
-        processing_depth, in_action = set_processing_depth(tree_depth)
+        processing_depth, in_action = set_processing_depth(src_root, tree_depth)
         match in_action:
             case MenuActions.SKIP:
+                summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=src_root, reason="by user")}") #--- Notification ---
                 continue
             case MenuActions.SUCCESS:
-                df.loc[row_id, "IsSelected"] = True
-                df.loc[row_id, "ProcessingDepth"] = processing_depth
+                df.loc[row_id, Cols.ROOT_SELECTED] = True
+                df.loc[row_id, Cols.ROOT_PROCESSING_DEPTH] = processing_depth
+                summary.append(f"{INDENT}{Notifications.ELEMENTS["root_selected"].build(dir_path=src_root)}") #--- Notification ---
             case MenuActions.INTERRUPT:
-                # return partial selection
+                summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=src_root, reason="by user")}") #--- Notification ---
+                for next_row_id in pending[pos+1:]:
+                    skipped_path = df.at[next_row_id, Cols.ROOT]
+                    summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=skipped_path, reason="by user")}") #--- Notification ---
                 break
         # Check if child exist next to the
         for next_row_id in pending[pos+1:]:
-            if next_row_id in skipped:
+            if next_row_id in skipped_child:
                 continue
-            pending_child = df.at[next_row_id, "SrcRoot"]
+            pending_child = df.at[next_row_id, Cols.ROOT]
             if is_parent(src_root, pending_child):
                 child_depth = depth_from_dir(pending_child, src_root)
                 if child_depth <= processing_depth:
-                    # CLI element
-                    print("\n".join([Separator.DASH.repeat(100), Info.ELEMENTS["skipped"].generate(path=pending_child)]))
-                    skipped.add(next_row_id)
+                    skipped_child.append(next_row_id)
+                    summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=pending_child, reason="as child")}") #--- Notification ---
 
-    return df.loc[df["IsSelected"]==True, ["SrcRoot", "ProcessingDepth"]]
+    if df[Cols.ROOT_SELECTED].loc[df[Cols.ROOT_SELECTED]].empty:
+        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
 
+    #--- Notification ---
+    print("\nSelection summary")
+    print("\n".join(summary))
+    #--- Notification ---
+    
+    return df
 
-def remove_dir(dir_path: str):
-    try:
-        content = os.listdir(dir_path)
-        if not content:
-            os.rmdir(dir_path)
-            return None
+def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
+    dirs_to_del = defaultdict(set)
+    for row_id, row in dirs_df.iterrows():
+        relpath = os.path.relpath(row[Cols.FILE_DIR_PATH], row[Cols.ROOT])
+        if relpath != '.': 
+            dir_parts = relpath.split(os.sep)
+            for level in range(len(dir_parts)):
+                dir_to_del = os.path.join(row[Cols.ROOT], os.sep.join(dir_parts[:level+1]))
+                dirs_to_del[level+1].add(dir_to_del)
+    return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
+
+def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cache, metadata: Cache, command: str = None, tagstore: TagStore = None):
+
+    op_name = operation.__name__
+    csv_writer = CSVWriter()
+
+    # Execute operation
+    tqdm.pandas(desc=f"{INDENT}{TQDMDesc.ELEMENTS[op_name].build()}", bar_format=TQDM_BAR) #------- TQDM ------
+    files_df[op_name] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[Cols.dest(Cols.FILE_PATH)]), axis=1)
+    files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"], tagstore=tagstore).run(files_df)
+    files_df = add_file_id(prefix="Dest", tagstore=tagstore).run(files_df)
+
+    # Remove emptied dirs
+    if operation is move:
+        dirs_df = files_df[[Cols.ROOT, Cols.FILE_DIR_PATH]].drop_duplicates()
+        dirs_to_del = collect_dirs_to_delete(dirs_df)
+        for dir_to_del in tqdm(dirs_to_del, desc=f"{INDENT}{TQDMDesc.ELEMENTS["remove"].build()}", bar_format=TQDM_BAR): #--- TQDM ---
+            try:
+                os.rmdir(dir_to_del)
+            except OSError as e:
+                tqdm.write(Errors.ELEMENTS["exception"].build(op="Remove dir", e=str(e))) #--- Error ---
+
+    n_total = len(files_df)
+    n_succeeded = len(files_df[op_name].loc[files_df[op_name].isna()])
+    n_failed = len(files_df[op_name].loc[files_df[op_name].notna()])
+
+    print(f"{INDENT}{INDENT}{INDENT}{Notifications.ELEMENTS["op_done"].build(n=n_succeeded, n_total=n_total, share=n_succeeded/n_total)}") #--- Notification ---
+    print(f"{INDENT}{INDENT}{INDENT}{Notifications.ELEMENTS["op_failed"].build(n=n_failed, n_total=n_total, share=n_failed/n_total)}") #--- Notification ---
+    
+    # Post operation cache sync
+    # Identify successfully completed operation cases
+    completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.INODE_DEV), Cols.dest(Cols.INODE)]]
+    completed = completed.rename(
+        columns = {
+            Cols.dest(Cols.FILE_PATH): Cols.FILE_PATH,
+            Cols.dest(Cols.INODE_DEV): Cols.INODE_DEV,
+            Cols.dest(Cols.INODE): Cols.INODE,
+        }
+    )
+    # Check file id change post operation
+    # If file id changed (move to another drive, copy) clone cache record from old to new id and update entry, delete old ones if move
+    # If no change (move within drive) update ffile path only
+    no_chg_id = completed.loc[completed[Cols.FILE_ID] == completed[Cols.dest(Cols.FILE_ID)]]
+    no_chg_id = no_chg_id[[Cols.FILE_ID, Cols.FILE_PATH]].set_index(Cols.FILE_ID)
+
+    chg_id = completed.loc[completed[Cols.FILE_ID] != completed[Cols.dest(Cols.FILE_ID)]]
+    src_to_dest = dict(zip(chg_id[Cols.FILE_ID], chg_id[Cols.dest(Cols.FILE_ID)]))
+    chg_id = chg_id[[Cols.dest(Cols.FILE_ID), Cols.FILE_PATH, Cols.INODE_DEV, Cols.INODE]].set_index(Cols.dest(Cols.FILE_ID))
+
+    # Update cache
+    for cache in (register, metadata):
+        if not no_chg_id.empty:
+            cache.update(no_chg_id) # ensure dtype alignment
+        if not chg_id.empty:
+            cache.clone(src_to_dest)
+            cache.update(chg_id.convert_dtypes()) # ensure dtype alignment
+            if operation is move:
+                # drop stale cache entries
+                stale_ids = list(src_to_dest.keys())
+                cache.delete(stale_ids)
+
+    # Save summary
+    files_df = files_df.dropna(axis="columns", how="all")
+    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
+    summary_path = os.path.join(OUTPUT_DIR_PATH, f"{command}_{datestamp}.csv")
+
+    print("\nSaved")
+    for result in [register.save(dropna=False), metadata.save(dropna=True), csv_writer.save(files_df, summary_path)]:
+        rel_path = os.path.relpath(result.path, PROJECT_ROOT)
+        if result.success:
+            print(f"{INDENT}{Notifications.ELEMENTS["save_done"].build(path=rel_path)}") #--- Notification ---
         else:
-            return f"ERROR - directory not empty {content}"
-    except Exception as e:
-        return f"ERROR - {e}"
+            print(f"{INDENT}{Notifications.ELEMENTS["save_failed"].build(path=rel_path, reason=result.error)}") #--- Notification ---
 
-def move(src_path: str, dest_path: str):
-    try:
-        if os.path.exists(dest_path):
-            raise RuntimeError("Destination occupied")
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        shutil.move(src_path, dest_path)
-        if os.path.exists(src_path):
-            raise RuntimeError("Source still exists")
-    except Exception as e:
-        return e
+    return files_df
 
-def copy(src_path: str, dest_path: str):
-    try:
-        if os.path.exists(dest_path):
-            raise RuntimeError("Destination occupied")
-        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        shutil.copy2(src_path, dest_path)
-    except Exception as e:
-        return e
+def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
+    match unit:
+        case "MB": return int(n_bytes / 1024 ** 2)
+        case "GB": return int(n_bytes / 1024 ** 3)
+        case "TB": return int(n_bytes / 1024 ** 4)
 
 ###############################
 ####### MAIN FUNCTIONS ########
 ###############################
 
-def restore(report_path: str, operation: Callable, config: Config) -> pd.DataFrame:
+def restore(
+        report_name: str,
+        operation: Callable,
+        config: Config
+    ) -> pd.DataFrame:
 
-    if operation not in (copy, move):
-        raise ValueError(f"Unknown operation: {operation.__name__}")
+    valid_ops  = (copy, move)
+    op_name = operation.__name__
+
+    if operation not in valid_ops:
+        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in valid_ops]))
 
     if operation is move:
         print("MOVE operation selected — original files at the source will be permanently deleted after being moved to the destination")
@@ -183,72 +274,59 @@ def restore(report_path: str, operation: Callable, config: Config) -> pd.DataFra
     for cache in (register, metadata):
         cache.load()
 
-    files_df = pd.read_csv(report_path)[[dest_col(Cols.FILE_ID), dest_col(Cols.FILE_PATH), Cols.FILE_PATH]]
-    # files_df = report_df[[dest_col(Cols.FILE_ID), dest_col(Cols.FILE_PATH), Cols.FILE_PATH]]
+    report_path = os.path.join(OUTPUT_DIR_PATH, report_name)
+    if not os.path.exists(report_path):
+        raise FileNotFoundError(f"Report not found: {report_path}")
+    files_df = pd.read_csv(report_path)[[Cols.dest(Cols.ROOT), Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.FILE_DIR_PATH), Cols.FILE_PATH]]
     files_df = files_df.rename(columns={
-        dest_col(Cols.FILE_ID): Cols.FILE_ID,
-        dest_col(Cols.FILE_PATH): Cols.FILE_PATH,
-        Cols.FILE_PATH: dest_col(Cols.FILE_PATH)
+        Cols.dest(Cols.ROOT): Cols.ROOT,
+        Cols.dest(Cols.FILE_ID): Cols.FILE_ID,
+        Cols.dest(Cols.FILE_DIR_PATH): Cols.FILE_DIR_PATH,
+        Cols.dest(Cols.FILE_PATH): Cols.FILE_PATH,
+        Cols.FILE_PATH: Cols.dest(Cols.FILE_PATH)
     })
 
-    if not files_df.empty:
+    if files_df.empty:
+        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="files")) #--- Error ---
 
-        # Execute operation
-        tqdm.pandas(desc=f"{f"{operation.__name__} files into new structure":<40}", bar_format=TQDM_BAR)
-        files_df[operation.__name__] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[dest_col(Cols.FILE_PATH)]), axis=1)
-        files_df = add_stat(prefix="Dest", metrics=["dev", "ino", "id"]).execute(files_df)
+    files_df = execute_operation(files_df, operation, register, metadata, command="restore")
 
-        # Remove emptied dirs
-        if operation is move:
-            files_df = files_df.loc[files_df[Cols.FILE_DIR_DEPTH] > 0].sort_values(by=Cols.FILE_DIR_DEPTH, ascending=False)
-            tqdm.pandas(desc=f"{f"remove empty directories":<40}", bar_format=TQDM_BAR)
-            files_df["rmdir"] = files_df[Cols.FILE_DIR_PATH].progress_apply(lambda dir_path: remove_dir(dir_path))
+    return files_df
 
-        # Update cache
-        completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, dest_col(Cols.FILE_ID), dest_col(Cols.FILE_PATH)]]
-        completed = completed.rename(columns={dest_col(Cols.FILE_PATH): Cols.FILE_PATH})
+def organise(
+        src_roots: str | list[str],
+        dest_root: str,
+        operation: Callable,
+        config: Config,
+        file_categories: list[Category] = None,
+        dir_schema: dict[str, list[str]] = None,
+        clear_cache: bool = False,
+    ) -> pd.DataFrame:
 
-        no_chg_id = completed.loc[completed[Cols.FILE_ID] == completed[dest_col(Cols.FILE_ID)]]
-        no_chg_id = no_chg_id[[Cols.FILE_ID, Cols.FILE_PATH]].set_index(Cols.FILE_ID)
+    valid_ops  = (copy, move)
+    op_name = operation.__name__
 
-        chg_id = completed.loc[completed[Cols.FILE_ID] != completed[dest_col(Cols.FILE_ID)]]
-        src_to_dest = dict(zip(chg_id[Cols.FILE_ID], chg_id[dest_col(Cols.FILE_ID)]))
-        chg_id = chg_id[[dest_col(Cols.FILE_ID), Cols.FILE_PATH]].set_index(dest_col(Cols.FILE_ID))
-        
-        for cache in (register, metadata):
-            if not no_chg_id.empty:
-                cache.update(no_chg_id)
-            if not chg_id.empty:
-                cache.clone(src_to_dest)
-                cache.update(chg_id)
-                if operation is move:
-                    # drop stale cache entries
-                    cache.delete(chg_id[Cols.FILE_ID])
-
-        # Save cache
-        register.save(dropna=False)
-        metadata.save(dropna=True)
-
-        return files_df
-
-    else:
-        print("Nothing to restore")
-        return files_df
-
-def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[str], operation: Callable, config: Config, clear_cache: bool = False) -> pd.DataFrame:
-
-    if operation not in (copy, move):
-        raise ValueError(f"Unknown operation: {operation.__name__}")
+    if operation not in valid_ops:
+        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in valid_ops])) #--- Error ---
 
     if operation is move:
+        # no space consequences
         print("MOVE operation selected — original files at the source will be permanently deleted after being moved to the destination")
         response = input("Proceed? [y/N]: ").strip().lower()
         if response == "n":
             return pd.DataFrame()
 
+    # Init tagstore
+    """
+    TagStore maps tags to the metadata columns present in a run. The set of possible
+    columns is finite, but the subset present varies per run and new files may introduce
+    unseen ones. Since assignments are cheap to recompute from the current columns via
+    fixed rules, TagStore is built fresh per run and kept in memory rather than persisted.
+    """
+    tagstore = TagStore()
+
     # Load cache
     register, metadata = config.register, config.metadata
-
     for cache in (register, metadata):
         if clear_cache:
             cache.clear()
@@ -257,158 +335,187 @@ def organise(src_roots: str | list[str], dest_root: str, dest_structure: list[st
 
     # Load ref
     ref_df = config.ref.load().rename(uppercase_text, axis="index").rename(columns={"category": Cols.FILE_CATEGORY})
-    # Load context
-    ctx = config.context
+
+    # Load services
+    exif = config.exif
+    geocoder = config.geocoder
+    date_parser = config.parser
 
     # Validate and select source roots
-    src_roots_df = pd.DataFrame(
-        {
-            "SrcRoot": [src_roots] if isinstance(src_roots, str) else src_roots,
-            "IsInvalid": False,
-            "IsDuplicate": False,
-            "IsSelected": False
-        }
-    )
-    src_roots_df = prepare_dirs().execute(src_roots_df)
-    src_roots_df = add_depth_metrics().execute(src_roots_df)
-    selected_roots_df = select_roots(src_roots_df)
+    src_roots_df = pd.DataFrame({Cols.ROOT: [src_roots] if isinstance(src_roots, str) else src_roots})
+    src_roots_df = validate_dirs().run(src_roots_df)
+    src_roots_df = FilterRows(
+        And([
+            Condition(Cols.ROOT_INVALID, "eq", False),
+            Condition(Cols.dup(Cols.ROOT), "eq", False),
+            Condition(Cols.ROOT_EMPTY, "eq", False)
+        ])
+    ).run(src_roots_df)
+    if src_roots_df.empty:
+        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
+    src_roots_df = add_depth_metrics().run(src_roots_df)
+    src_roots_df = select_roots(src_roots_df)
+    src_roots_df = FilterRows(Condition(Cols.ROOT_SELECTED, "eq", True)).run(src_roots_df)
 
     # Extract files to process
-    dir_records = []
     file_records = []
-    for row_id in selected_roots_df.index:
-        src_root = selected_roots_df.loc[row_id, Cols.SRC_ROOT]
-        processing_depth = selected_roots_df.loc[row_id, Cols.ROOT_PROCESSING_DEPTH]
+    for row_id in src_roots_df.index:
+        src_root = src_roots_df.loc[row_id, Cols.ROOT]
+        processing_depth = src_roots_df.loc[row_id, Cols.ROOT_PROCESSING_DEPTH]
+        root_files = []
         for depth, dir, filenames in iter_dir_tree(src_root, processing_depth):
-            dir_records.append((src_root, processing_depth, dir, depth))
             for filename in filenames:
-                file_records.append((src_root, processing_depth, dir, depth, filename))
-    dirs_df = pd.DataFrame(dir_records, columns=[Cols.SRC_ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.DIR_PATH, Cols.DIR_DEPTH])
-    files_df = pd.DataFrame(file_records, columns=[Cols.SRC_ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
+                root_files.append((src_root, processing_depth, dir, depth, filename))
+        file_records.extend(root_files)
 
     # Pre-processing
-    files_df[Cols.EXIF_ARGS] = "".join(config.exif.args)
-    files_df = assemble_file_path(prefix="").execute(files_df)
-    files_df = add_stat(prefix="", metrics=["size", "mtime", "dev", "ino", "id"]).execute(files_df)
+    files_df = pd.DataFrame(file_records, columns=[Cols.ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
 
-    # Extract exif metadata
+    #--- Notification ---
+    print("\nFiles found")
+    for root in files_df[Cols.ROOT].unique():
+        print(f"{INDENT}{Notifications.ELEMENTS["root_stat"].build(dir_path=root, n=len(files_df.loc[files_df[Cols.ROOT] == root]))}")
+    #--- Notification ---
+
+    files_df[Cols.EXIF_ARGS] = "".join(EXIFTOOL_ARGS)
+    files_df[Cols.dest(Cols.ROOT)] = dest_root
+    files_df = assemble_file_path(prefix="", tagstore=tagstore).run(files_df)
+    files_df = add_stat(prefix="", metrics=["st_size", "st_mtime", "st_dev", "st_ino"], tagstore=tagstore).run(files_df)
+    files_df = add_file_id(prefix="", tagstore=tagstore).run(files_df)
+    reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
+
+    # Check if there is enough space to procesfiles
+    required = files_df[Cols.SIZE].sum()
+    _, _, free = shutil.disk_usage(dest_root)
+    if required >= free:
+        required_gb = bytes_converter(required, "GB")
+        free_gb = bytes_converter(free, "GB")
+        raise RuntimeError(Errors.ELEMENTS["low_disk_space"].build(op=op_name, required=required_gb, free=free_gb)) #--- Error ---
+
     new_files_df = files_df[~files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
     known_files_df = files_df[files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
 
-    changed_files_df = None
-
+    # Identify changed files
+    changed_files_df = pd.DataFrame()
     if not known_files_df.empty:
         date_change = register.data.loc[known_files_df.index, Cols.MODIFIED_AT] != known_files_df[Cols.MODIFIED_AT] # risky check for float type
         size_change = register.data.loc[known_files_df.index, Cols.SIZE] != known_files_df[Cols.SIZE]
         args_change = register.data.loc[known_files_df.index, Cols.EXIF_ARGS] != known_files_df[Cols.EXIF_ARGS]
         changed_files_df = known_files_df.loc[date_change | size_change | args_change]
 
-    to_exif_df = pd.concat([new_files_df, changed_files_df])
+    print("\nFiles processing")
+    n_total = len(files_df)
+    n_loaded = len(known_files_df) - len(changed_files_df)
+    print(f"{INDENT}{Notifications.ELEMENTS["cache_load"].build(n=n_loaded, n_total=n_total, share=n_loaded/n_total)}") #--- Notification ---
+
+    # Extract exif metadata
+    to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[Cols.FILE_PATH, Cols.FILE_ID, Cols.INODE_DEV, Cols.INODE]]
     if not to_exif_df.empty:
         files_to_exif = to_exif_df[Cols.FILE_PATH].to_list()
-        exif_results = list(tqdm(config.exif.extract(files_to_exif), total=len(files_to_exif), desc=f"{"Extracting exif metadata":<40}", bar_format=TQDM_BAR))
+        n_files = len(files_to_exif)
+        exif_results = list(tqdm(exif.extract(files_to_exif, args=EXIFTOOL_ARGS), total=n_files, desc=f"{INDENT}{TQDMDesc.ELEMENTS["extract"].build()}", bar_format=TQDM_BAR)) #------- TQDM ------
         exif_df = pd.DataFrame(exif_results)
         exif_df["SourceFile"] = exif_df["SourceFile"].apply(os.path.normpath)
-        exif_df = exif_df.merge(to_exif_df.reset_index()[[Cols.FILE_PATH, Cols.FILE_ID]], how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
+        exif_df = exif_df.merge(to_exif_df, how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
         exif_df = exif_df.drop(columns="SourceFile")
         exif_df = exif_df.set_index(Cols.FILE_ID)
 
     # Update cache
     if not changed_files_df.empty:
-        register.update(changed_files_df[REGISTER_COLS])
-        metadata.update(exif_df.loc[changed_files_df.index])
+        register.update(changed_files_df[reg_cols])
+        metadata.update(exif_df.loc[exif_df.index.isin(changed_files_df.index)])
 
     if not new_files_df.empty:
-        register.add(new_files_df[REGISTER_COLS])
-        metadata.add(exif_df.loc[new_files_df.index])
+        register.add(new_files_df[reg_cols])
+        metadata.add(exif_df.loc[exif_df.index.isin(new_files_df.index)])
 
-    # Select exif metadata
-    metadata_df = tag_columns(ctx, name_tags=TagsMapping.NAME, keyword_tags=TagsMapping.KEYWORD).execute(metadata.data)
-    selected_metadata_df = select_columns(
-        ctx,
-        names=[Cols.FILE_TYPE_EXT, Cols.XML_HEADING_PAIRS, Cols.EXIF_GPS_LATITUDE, Cols.EXIF_GPS_LONGITUDE, Cols.EXIF_MODEL],
-        tags=[Tags.CREATE_DT, Tags.ACCESS_DT, Tags.MODIFY_DT]
-    ).execute(metadata_df)
+    # Select metadata
+    metadata_df = metadata.data[metadata.data.index.isin(files_df[Cols.FILE_ID])]
+    date_cols = [col for date_tag in META_DATE_TAGS for col in META_TAGS_TO_COLS[date_tag].select(metadata_df.columns)]
+    dims_cols = NameFilter([Cols.FILE_TYPE_EXT, Cols.EXIF_MODEL, Cols.EXIF_GPS_LATITUDE, Cols.EXIF_GPS_LONGITUDE, Cols.XML_HEADING_PAIRS]).select(metadata_df.columns)
+    metadata_df = metadata_df[date_cols + dims_cols]
 
-    # Enrich files with exif metadata, assemble destination file path
-    files_df = files_df.merge(selected_metadata_df, how="left", left_on=Cols.FILE_ID, right_index=True)
-    files_df = consolidate_file_ext(ctx).execute(files_df)
-    files_df = exclude_rows(ctx, col=Cols.CONSOLIDATED_EXT, values=["MRIMGX"]).execute(files_df)
+    # Enrich files with exif metadata
+    files_df = files_df.merge(metadata_df, how="left", left_on=Cols.FILE_ID, right_index=True)
+    files_df = consolidate_file_ext(tagstore=tagstore).run(files_df)
+
+    # Get categories from ref
     files_df = files_df.merge(ref_df[Cols.FILE_CATEGORY], how="left", left_on=Cols.CONSOLIDATED_EXT, right_index=True)
-    files_df = assemble_dest_dir(ctx, dest_root, dest_structure).execute(files_df)
-    files_df = assemble_file_path(prefix="Dest").execute(files_df)
+    files_df[Cols.FILE_CATEGORY] = files_df[Cols.FILE_CATEGORY].fillna("Other")
+
+    # Filter file category
+    if file_categories:
+        files_df = FilterRows(Condition(Cols.FILE_CATEGORY, "isin", file_categories)).run(files_df)
+        if files_df.empty:
+            raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="files")) #--- Error ---
+        n_filtered = n_total - len(files_df)
+        print(f"{INDENT}{Notifications.ELEMENTS["filtered"].build(n=n_filtered, n_total=n_total, share=n_filtered/n_total)}") #--- Notification ---
+
+    # Resolve dest dir schema
+    if dir_schema:
+        resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
+        dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
+        
+        # Calculate dims features
+        dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser, tagstore=tagstore)
+        for dims in resolved_dir_schema.values():
+            for dim in dims:
+                if dim in files_df.columns:
+                    continue
+                elif dim in dims_calc:
+                    files_df = dims_calc[dim].run(files_df)
+                else:
+                    raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=dims_calc.keys())) #--- Error ---
+        # Asemble dest dir per category
+        for cat, dims in dims_per_category.items():
+            files_df = assemble_dest_dir(dest_root, file_category=cat, dims=dims, tagstore=tagstore).run(files_df)
+    else:
+        # Everything goes to root dir
+        files_df = assemble_dest_dir(dest_root, tagstore=tagstore).run(files_df)
+
+    # Assemble dest file path
+    files_df = assemble_file_path(prefix="Dest", tagstore=tagstore).run(files_df)
 
     # Execute operation
-    tqdm.pandas(desc=f"{f"{operation.__name__} files into new structure":<40}", bar_format=TQDM_BAR)
-    files_df[operation.__name__] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[dest_col(Cols.FILE_PATH)]), axis=1)
-    files_df = add_stat(prefix="Dest", metrics=["dev", "ino", "id"]).execute(files_df)
-
-    # Remove emptied dirs
-    if operation is move:
-        dirs_df = dirs_df.loc[dirs_df[Cols.DIR_DEPTH] > 0].sort_values(by=Cols.DIR_DEPTH, ascending=False)
-        tqdm.pandas(desc=f"{f"remove empty directories":<40}", bar_format=TQDM_BAR)
-        dirs_df["rmdir"] = dirs_df[Cols.DIR_PATH].progress_apply(lambda dir_path: remove_dir(dir_path))
-
-    # Update cache
-    completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, dest_col(Cols.FILE_ID), dest_col(Cols.FILE_PATH)]]
-    completed = completed.rename(columns={dest_col(Cols.FILE_PATH): Cols.FILE_PATH})
-
-    no_chg_id = completed.loc[completed[Cols.FILE_ID] == completed[dest_col(Cols.FILE_ID)]]
-    no_chg_id = no_chg_id[[Cols.FILE_ID, Cols.FILE_PATH]].set_index(Cols.FILE_ID)
-
-    chg_id = completed.loc[completed[Cols.FILE_ID] != completed[dest_col(Cols.FILE_ID)]]
-    src_to_dest = dict(zip(chg_id[Cols.FILE_ID], chg_id[dest_col(Cols.FILE_ID)]))
-    chg_id = chg_id[[dest_col(Cols.FILE_ID), Cols.FILE_PATH]].set_index(dest_col(Cols.FILE_ID))
-    
-    for cache in (register, metadata):
-        if not no_chg_id.empty:
-            cache.update(no_chg_id)
-        if not chg_id.empty:
-            cache.clone(src_to_dest)
-            cache.update(chg_id)
-            if operation is move:
-                # drop stale cache entries
-                cache.delete(chg_id[Cols.FILE_ID])
-
-    # save cache
-    register.save(dropna=False)
-    metadata.save(dropna=True)
+    files_df = execute_operation(files_df, operation, register, metadata, command="organise")
 
     return files_df
 
-if __name__ == "__main__":
-    
-    exif_path = find_exiftool()
-
-    project_root = os.path.dirname(os.path.abspath(__file__)) # __file__ does not exist in REPL, Jupyter, debugger
-    cache_dir_path = os.path.join(project_root, CACHE_DIR)
-    register_path = os.path.join(cache_dir_path, CACHE_REGISTER)
-    metadata_path = os.path.join(cache_dir_path, CACHE_METADATA)
+def main(command: str = "organise"):
 
     json_loader = JSONLoader(orient="index")
-    json_writer = JSONWriter(orient="index", indent=4, force_ascii=False)
+    json_writer = JSONWriter(orient="index", force_ascii=False)
 
     config = Config(
-        register=Cache(path=register_path, writer=json_writer, loader=json_loader),
-        metadata=Cache(path=metadata_path, writer=json_writer, loader=json_loader),
-        ref=Reference(path="ref/extension.json", loader=json_loader),
-        exif=Exif(path=exif_path, batch_size=50, args=["-j", "-G", "-all", "--File:Directory"]),
-        context=Context(parser=DateParser(), geocoder=RGeocoder(mode=1, verbose=False))
+        register=Cache(path=REGISTER_PATH, writer=json_writer, loader=json_loader),
+        metadata=Cache(path=METADATA_PATH, writer=json_writer, loader=json_loader),
+        ref=Reference(path=EXTENSION_MAP_PATH, loader=json_loader),
+        exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCOODING, batch_size=EXIFTOOL_BATCH_SIZE),
+        geocoder=RGeocoder(mode=1, verbose=False),
+        parser=DateParser(),
     )
 
-    organised = organise(
-        # src_roots=["D:\\OneDrive"],
-        src_roots=["D:\\MyOrganizedFiles"],
-        dest_root="D:\\MyOrganizedFiles",
-        dest_structure=[dup_label_col(Cols.FILE_HASH), Cols.EARLIEST_YEAR, Cols.FILE_CATEGORY, Cols.EXIF_MODEL, Cols.IMAGE_COUNTRY, Cols.WORKSHEETS_COUNT],
-        operation=move,
-        config=config,
-        clear_cache=False,
-    )
+    all_categories = json_loader.load(EXTENSION_MAP_PATH).category.drop_duplicates().to_list()
+    category_selection = CategorySelection(categories=all_categories).get()
 
-    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
-    CSVWriter(encoding="utf-8-sig").save(organised, f"output\\completed_{datestamp}.csv")
+    if command == "organise":
+        result_df = organise(
+            src_roots=["D:\\OneDrive"],
+            # src_roots=["D:\\MyOrganizedFiles1"],
+            dest_root="D:\\MyOrganizedFiles",
+            operation=copy,
+            config=config,
+            file_categories=category_selection,
+            dir_schema=DIR_SCHEMA,
+            clear_cache=True,
+        )
 
-    # rollback_df = rollback("D:\\Development\\Software\\Projects\\file_organiser\\output\\summary_20260805T165005.csv", operation=copy, config=config)
-    # datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
-    # CSVWriter(encoding="utf-8-sig").save(rollback_df, f"output\\rollback_{datestamp}.csv")
+    elif command == "restore":
+        result_df = restore(
+            report_name="organise_20260831T182240.csv",
+            operation=move,
+            config=config
+        )
+
+if __name__ == "__main__":
+    main()

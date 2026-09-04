@@ -1,7 +1,6 @@
 import datetime as dt
 import pandas as pd
 from utils.text import get_chars_pattern
-import hashlib
 
 class DateParser:
     def __init__(self):
@@ -66,34 +65,3 @@ class DateParser:
     
     def get_summary(self):
         return self.summary
-
-# def calc_partial_hash(path: str, hash_algo: str, parts: int, read_cap: int) -> dict:
-#     hash_func = getattr(hashlib, hash_algo)
-#     file_size = os.path.getsize(path)
-#     file_parts = file_size // parts
-#     # remainder = file_size % parts
-#     byte_steps = [file_parts * step for step in range(parts)]
-#     combined_hash = hash_func()
-#     try:
-#         with open(path, "rb") as f:
-#             for byte_step in byte_steps:
-#                 f.seek(byte_step, 0)
-#                 data = f.read(read_cap)
-#                 combined_hash.update(data)
-#         return {"hash": combined_hash.hexdigest()}
-#     except PermissionError:
-#         return {"hash": ""}
-    
-def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> str:
-    try:
-        # hashlib.algorithms_available
-        hash_func = hashlib.new(hash_algo)
-        with open(path, "rb") as f:
-            while True:
-                data = f.read(buf_size)
-                if not data:
-                    break
-                hash_func.update(data)
-        return hash_func.hexdigest()
-    except PermissionError:
-        return ""

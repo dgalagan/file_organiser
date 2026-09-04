@@ -1,28 +1,44 @@
 from dataclasses import dataclass, field
-from cli.tokens import Emoji, Separator
+from cli.tokens import Emoji, Separator, Icon
 from typing import Literal, ClassVar, get_args
+
+GREEN = "\033[32m"
+RED = "\033[31m"
+CYAN = "\033[36m"
+RESET = "\033[0m"
 
 @dataclass
 class Template():
     construct: list = field(default_factory=list)
 
     # String items
-    def start(self, value):
-        self.construct.append(value)
-        return self
-    def separator(self, value):
-        self.construct.append(value)
-        return self
-    def emoji(self, value):
+    def token(self, value):
         self.construct.append(value)
         return self
     def message(self, value):
         self.construct.append(value)
         return self
+    def padding(self, num: int, align: Literal["<", ">", "^"] = "<"):
+        to_collapse = []
+        for item in list(self.construct):
+            if isinstance(item, tuple):
+                continue
+            else:
+                to_collapse.append(item)
+                self.construct.remove(item)
+        self.construct.append(("".join(to_collapse), num, align))
+        return self
     
     # String items assembly
-    def generate(self, **kwargs):
-        return "".join(self.construct).format(**kwargs)
+    def build(self, **kwargs):
+        result = ""
+        for item in self.construct:
+            if isinstance(item, tuple):
+                part, pad, align = item
+                result += f"{part.format(**kwargs):{align}{pad}}"
+            else:
+                result += item
+        return result.format(**kwargs)
 
 @dataclass
 class Component():
@@ -34,84 +50,191 @@ class Component():
             raise TypeError(f"Option drift in {cls.__name__}: {defined ^ declared}")
 
 @dataclass
-class Header(Component):
-
-    START: ClassVar[str] = "\n"
-    SEPARATOR: ClassVar[str] = Separator.DASH.repeat(40)
-    WIDTH: ClassVar[int] = 20
-    
-    Options = Literal["dest_dir", "src_dirs", "csv_load", "manual_load", "depth"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "dest_dir":     Template().start(START).separator(SEPARATOR).message("Select Dest Dir".center(WIDTH)).separator(SEPARATOR),
-        "src_dirs":     Template().start(START).separator(SEPARATOR).message("Select Src Dirs".center(WIDTH)).separator(SEPARATOR),
-        "csv_load":     Template().start(START).separator(SEPARATOR).message("CSV load".center(WIDTH)).separator(SEPARATOR),
-        "manual_load":  Template().start(START).separator(SEPARATOR).message("Manual load".center(WIDTH)).separator(SEPARATOR),
-        "depth":        Template().start(START).separator(SEPARATOR).message("Depth".center(WIDTH)).separator(SEPARATOR),
-    }
-
-@dataclass
-class MenuLine(Component):
-
-    START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = Emoji.KEYBOARD
-    SEPARATOR: ClassVar[str] = Separator.SPACE
-
-    Options = Literal["exit", "cancel", "restart", "skip", "skip_all", "csv_load", "manual_load", "manual_stop", "depth"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "exit":         Template().start(START).emoji(Emoji.CROSSMARK).separator(SEPARATOR).message("Press 'Ctrl+C' to suspend the script"),
-        "cancel":       Template().start(START).emoji(Emoji.LEFTWARDARROW).separator(SEPARATOR).message("Press 'Ctrl+C' to cancel"),
-        "restart":      Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Press 'Ctrl+C' to cancel current input and retry"),
-        "skip":         Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Type 'skip' to skip current dir path"),
-        "skip_all":     Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Type 'skipall' to skip the rest of dir path(s)"),
-        "csv_load":     Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Type 'csv' to load dir path(s) from CSV"),
-        "manual_load":  Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Type 'manual' to provide dir path(s) directly in CLI"),
-        "manual_stop":  Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Type 'stop' to finish adding dir path(s)"),
-        "depth":        Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Select 'depth level' from {depth_options}"),
-    }
-
-@dataclass
 class Prompt(Component):
-    
+
     START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = Emoji.RIGHTARROW
+    EMOJI:  ClassVar[str] = Icon.INPUT
     SEPARATOR: ClassVar[str] = Separator.SPACE
 
-    Options = Literal["base", "clean", "csv", "manual", "manual_additional", "depth"]    
+    Options = Literal["depth_input"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "base":                 Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Provide your option: "),
-        "clean":                Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Delete content from {path} permanently (y/n)? "),
-        "csv":                  Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Enter link to CSV file: "),
-        "manual":               Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Enter dir path: "),
-        "manual_additional":    Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Add another one: "),
-        "depth":                Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Select 'depth level' from {range}: ")
+        "depth_input": (
+        Template()
+        .token(EMOJI)
+        .token(SEPARATOR)
+        .message(f"{{dir_path}} {CYAN}({{num}}){RESET}")
+        )
     }
 
 @dataclass
-class Warning(Component):
+class Errors(Component):
+
+    START: ClassVar[str] = ""
+    EMOJI:  ClassVar[str] = Emoji.CROSSMARK
+    SEPARATOR: ClassVar[str] = Separator.SPACE 
+
+    Options = Literal["empty_input", "exception", "unknown_value", "low_disk_space"]
+    ELEMENTS: ClassVar[dict[Options, Template]] = {
+        "empty_input":(
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("No {subject} available")
+        ),
+        "exception":(
+             Template()
+             .token(EMOJI)
+             .token(SEPARATOR)
+             .message("Error while {op}: {e:.30}")
+        ),
+        "unknown_value":(
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Unknown value: {received}. Expected: {expected}")
+        ),
+        "low_disk_space":(
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Not enough space to {op} files: need {required} GB, {free} GB free")
+        )
+    }
+
+@dataclass
+class Warnings(Component):
 
     START: ClassVar[str] = ""
     EMOJI:  ClassVar[str] = Emoji.WARNINGSIGN
     SEPARATOR: ClassVar[str] = Separator.SPACE
 
-    Options = Literal["invalid_input", "empty_input", "load_failed"]
+    Options = Literal["invalid_input", "not_found"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "invalid_input":    Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("Invalid input"),
-        "empty_input":      Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("No dir path(s) to process"),
-        "load_failed":      Template().start(START).emoji(EMOJI).separator(SEPARATOR).message("{option} load failed with the reason - {e}"),
+        "invalid_input": (
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Invalid input")
+        ),
+        "not_found": (
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Columns not found")
+            .padding(31)
+            .message("- {cols}")
+        )
     }
 
 @dataclass
-class Info(Component):
+class Notifications(Component):
     
     START: ClassVar[str] = ""
     EMOJI:  ClassVar[str] = ""
     SEPARATOR: ClassVar[str] = Separator.SPACE
     
-    Options = Literal["exit", "processing", "extracting", "skipped", "selected"]
+    Options = Literal["root_selected", "root_skipped", "root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done", "save_failed"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "exit":         Template().start(START).emoji(Emoji.STOPSIGN).separator(SEPARATOR).message("[Terminated]"),
-        "processing":   Template().start(START).emoji(Emoji.HOURGLASS).separator(SEPARATOR).message("[Processing] -----> {dir_path}"),
-        "extracting":   Template().start(START).emoji(Emoji.OPENFILEFOLDER).separator(SEPARATOR).message("[Extracting] -----> {path}"),
-        "skipped":      Template().start(START).emoji(Emoji.GEAR).separator(SEPARATOR).message("[Skipped]    -----> {path}"),
-        "selected":     Template().start(START).emoji(Emoji.BULLSEYE).separator(SEPARATOR).message("[Selected]   -----> {count}"),
+        "root_selected": (
+            Template()
+            .token(f"{GREEN}{Icon.CHECKMARK}{RESET}")
+            .token(SEPARATOR)
+            .padding(22)
+            .message(" | {dir_path}")
+        ),
+        "root_skipped": (
+            Template()
+            .token(f"{RED}{Icon.CROSSMARK}{RESET}")
+            .token(SEPARATOR)
+            .message("{reason:>9} | {dir_path}")
+        ),
+        "root_stat": (
+            Template()
+            .token(Icon.INFORMATION)
+            .token(SEPARATOR)
+            .message("{n:>9,} | {dir_path}")
+        ),
+        "cache_load": (
+            Template()
+            .token(Icon.INFORMATION)
+            .token(SEPARATOR)
+            .message("Metadata from cache")
+            .padding(30)
+            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
+        ),
+        "filtered": (
+            Template()
+            .token(Icon.INFORMATION)
+            .token(SEPARATOR)
+            .message("Filtered")
+            .padding(30)
+            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
+        ),
+        "op_done": (
+            Template()
+            .token(f"{GREEN}{Icon.CHECKMARK}{RESET}")
+            .token(SEPARATOR)
+            .message(f"Done")
+            .padding(35)
+            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
+        ),
+        "op_failed": (
+            Template()
+            .token(f"{RED}{Icon.CROSSMARK}{RESET}")
+            .token(SEPARATOR)
+            .message("Failed")
+            .padding(35)
+            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
+        ),
+        "save_done": (
+            Template()
+            .token(f"{GREEN}{Icon.CHECKMARK}{RESET}")
+            .token(SEPARATOR)
+            .padding(22)
+            .message("| {path}")
+        ),
+        "save_failed": (
+            Template()
+            .token(f"{RED}{Icon.CROSSMARK}{RESET}")
+            .token(SEPARATOR)
+            .message("{reason:>9} | {path}")
+        ),
+    }
+
+@dataclass
+class TQDMDesc(Component):
+    
+    EMOJI:  ClassVar[str] = Icon.GREATERTHAN
+    SEPARATOR: ClassVar[str] = Separator.SPACE
+
+    Options = Literal["extract", "copy", "move", "remove"]
+    ELEMENTS: ClassVar[dict[Options, Template]] = {
+        "extract": (
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Extract files metadata")
+            .padding(30)
+        ),
+        "copy": (
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Copy files")
+            .padding(30)
+        ),
+        "move": (
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Move files")
+            .padding(30)
+        ),
+        "remove": (
+            Template()
+            .token(EMOJI)
+            .token(SEPARATOR)
+            .message("Remove dirs")
+            .padding(30)
+        ),
     }

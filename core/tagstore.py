@@ -8,10 +8,8 @@ class TagStore:
             return set()
         return set().union(*self.tagged_items.values())
 
-    def assign_tags(self, item: str, tags: list[str] | str):
-        if isinstance(tags, str):
-            tags = [tags]
-        for tag in tags:
+    def assign_tag(self, items: list[str], tag: str):
+        for item in items:
             self.tagged_items.setdefault(item, set()).add(tag)
         return self
     

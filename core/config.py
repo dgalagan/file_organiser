@@ -1,16 +1,17 @@
-from dataclasses import dataclass, field
-from dataframe.context import Context
-from dataframe.write import JSONWriter
+from dataclasses import dataclass
+from dataframe.write import JSONWriter, SaveResult
 from dataframe.load import JSONLoader
-from dataframe.predicate import Predicate, Condition, And, Or, AllRows
 from exiftool import ExifTool
 import json
 import os
 import pandas as pd
 from typing import Iterator
+from reverse_geocoder import RGeocoder
+from core.parser import DateParser
+from cli.components import Errors
 
 def get_batches(files: list[str], batch_size: int) -> list[list[str]]:
-    if batch_size <= 0:
+    if batch_size is None or batch_size <= 0:
         return [files]
     return [files[i:i + batch_size] for i in range(0, len(files), batch_size)]
 
@@ -33,12 +34,12 @@ class Cache:
     def _require_data(self) -> None:
         self._require_loaded()
         if self.data.empty:
-            raise ValueError("Cache is empty")
+            raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="cache"))
 
-    def load(self) -> pd.DataFrame:
+    def load(self) -> None:
         self.data = self.loader.load(self.path)
 
-    def clear(self) -> pd.DataFrame:
+    def clear(self) -> None:
         self.data = pd.DataFrame()
 
     def add(self, new_entries: pd.DataFrame) -> None:
@@ -48,7 +49,7 @@ class Cache:
             raise ValueError(f"New entries overlap with existing")
         self.data = pd.concat([self.data, new_entries])
 
-    def update(self, changed_entries: pd.DataFrame):
+    def update(self, changed_entries: pd.DataFrame) -> None:
         self._require_data()
         self.data.loc[changed_entries.index, changed_entries.columns] = changed_entries
 
@@ -61,9 +62,9 @@ class Cache:
         self._require_data()
         self.data = self.data.drop(index=entry_ids, errors="ignore")
 
-    def save(self, dropna: bool = False) -> None:
+    def save(self, dropna: bool = False) -> SaveResult:
         self._require_loaded()
-        self.writer.save(self.data, self.path, dropna=dropna)
+        return self.writer.save(self.data, self.path, dropna=dropna)
 
 @dataclass
 class Reference:
@@ -75,14 +76,19 @@ class Reference:
 
 @dataclass
 class Exif:
-    path: str
-    batch_size: int
-    args: list[str] = field(default_factory=list)
+    path: str = None # default = PATH
+    encoding: str = None # default = locale.getpreferredencoding()
+    batch_size: int = None
 
-    def extract(self, files: list[str]) -> Iterator[dict]:
-        with ExifTool(encoding="utf-8", executable=self.path) as et:
+    def _build_exif(self) -> ExifTool:
+        if self.path:
+            return ExifTool(encoding=self.encoding, executable=self.path)
+        return ExifTool(encoding=self.encoding)
+
+    def extract(self, files: list[str], args: list[str]) -> Iterator[dict]:
+        with self._build_exif() as et:
             for batch in get_batches(files, self.batch_size):
-                raw_output = et.execute(*self.args, *batch)
+                raw_output = et.execute(*args, *batch)
                 yield from json.loads(raw_output)
 
 @dataclass
@@ -91,5 +97,5 @@ class Config:
     metadata: Cache
     ref: Reference
     exif: Exif
-    context: Context
-    # filter: Predicate
+    geocoder: RGeocoder
+    parser: DateParser

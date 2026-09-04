@@ -13,14 +13,18 @@ class Predicate(ABC):
 @dataclass
 class Condition(Predicate):
     col: str
-    comparator: Literal["eq", "ne", "lt", "le", "gt", "ge", "isna", "notna"]
+    comparator: Literal["eq", "ne", "lt", "le", "gt", "ge", "isin", "notin", "isna", "notna"]
     val: object = None
 
     def apply(self, df: pd.DataFrame) -> pd.Series:
         if self.comparator == "isna":
             return df[self.col].isna()
-        if self.comparator == "notna":
+        elif self.comparator == "notna":
             return df[self.col].notna()
+        elif self.comparator == "isin":
+            return df[self.col].isin(self.val)
+        elif self.comparator == "notin":
+            return ~df[self.col].isin(self.val)
         return getattr(operator, self.comparator)(df[self.col], self.val)
 
 @dataclass
