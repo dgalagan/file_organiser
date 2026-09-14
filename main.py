@@ -12,14 +12,14 @@ from dataframe.pipeline import FilterRows
 from dataframe.col_filter import ColumnFilter, NameFilter, KeywordFilter, CombinedFilter
 from dataframe.predicate import Condition, And
 from dataframe.write import CSVWriter, JSONWriter
-from dataframe.load import JSONLoader
+from dataframe.load import CSVLoader, JSONLoader
 from datetime import datetime
 import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
-from typing import Callable, Literal
+from typing import Callable, Literal, get_args
 from utils.path import iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
 from utils.text import uppercase_text
 from collections import defaultdict
@@ -37,6 +37,7 @@ from collections import defaultdict
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
 # [df] ensure coherence of dtypes
+# [categories] validate literal list against ref table
 
 EXIFTOOL_PATH = "D:/Development/Software/Projects/file_organiser/bin/exif/exiftool(-k).exe"
 EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
@@ -404,7 +405,7 @@ def organise(
             cache.load()
 
     # Load ref
-    ref_df = config.ref.load().rename(uppercase_text, axis="index").rename(columns={"category": Cols.FILE_CATEGORY})
+    ref_df = config.ref.load()
 
     # Load services
     exif = config.exif
@@ -497,7 +498,7 @@ def organise(
     files_df = consolidate_file_ext(tagstore=tagstore).run(files_df)
 
     # Get categories from ref
-    files_df = files_df.merge(ref_df[Cols.FILE_CATEGORY], how="left", left_on=Cols.CONSOLIDATED_EXT, right_index=True)
+    files_df = files_df.merge(ref_df[[Cols.FILE_EXT, Cols.FILE_CATEGORY]], how="left", left_on=Cols.CONSOLIDATED_EXT, right_on=Cols.FILE_EXT)
     files_df[Cols.FILE_CATEGORY] = files_df[Cols.FILE_CATEGORY].fillna("Other")
 
     # Filter file category
@@ -540,20 +541,20 @@ def organise(
 
 def main(command: str = "organise"):
 
+    csv_loader = CSVLoader(encoding="cp852")
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)
 
     config = Config(
         register=Cache(path=REGISTER_PATH, writer=json_writer, loader=json_loader),
         metadata=Cache(path=METADATA_PATH, writer=json_writer, loader=json_loader),
-        ref=Reference(path=EXTENSION_MAP_PATH, loader=json_loader),
+        ref=Reference(path=EXTENSION_MAP_PATH, loader=csv_loader),
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCOODING, batch_size=EXIFTOOL_BATCH_SIZE),
         geocoder=RGeocoder(mode=1, verbose=False),
         parser=DateParser(),
     )
 
-    all_categories = json_loader.load(EXTENSION_MAP_PATH).category.drop_duplicates().to_list()
-    category_selection = CategorySelection(categories=all_categories).get()
+    category_selection = CategorySelection(categories=get_args(Category)).get()
 
     if command == "organise":
        organise(

@@ -14,3 +14,10 @@ class JSONLoader(Loader):
 
     def load(self, path: str) -> pd.DataFrame:
         return pd.read_json(path, orient=self.orient)
+
+@dataclass
+class CSVLoader(Loader):
+    encoding: str
+
+    def load(self, path: str) -> pd.DataFrame:
+        return pd.read_csv(path, encoding=self.encoding)

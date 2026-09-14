@@ -1,5 +1,6 @@
 from typing import Literal
 
+# all_categories = csv_loader.load(EXTENSION_MAP_PATH)[Cols.FILE_CATEGORY].drop_duplicates().to_list()
 Category = Literal[
     "Application", "Archive", "Audio", "Cache", "Config", "Database",
     "Data-Excel", "Data-PowerPoint", "Data-PowerBI", "Data-Other",

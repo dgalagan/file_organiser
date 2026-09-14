@@ -8,7 +8,7 @@ except NameError:
 
 # --- Reference ---
 REF_DIR = "ref"
-REF_EXTENSION_MAP = "extension_map.json"
+REF_EXTENSION_MAP = "ext_mapping.csv"
 REF_DIR_PATH = os.path.join(PROJECT_ROOT, REF_DIR)
 EXTENSION_MAP_PATH = os.path.join(REF_DIR_PATH, REF_EXTENSION_MAP)
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from dataframe.write import JSONWriter, SaveResult
-from dataframe.load import JSONLoader
+from dataframe.load import JSONLoader, CSVLoader
 from exiftool import ExifTool
 import json
 import os
@@ -69,7 +69,7 @@ class Cache:
 @dataclass
 class Reference:
     path: str
-    loader: JSONLoader
+    loader: CSVLoader
 
     def load(self) -> pd.DataFrame:
         return self.loader.load(self.path)
