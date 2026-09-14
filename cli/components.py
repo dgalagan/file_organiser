@@ -1,12 +1,6 @@
 from dataclasses import dataclass, field
-from cli.tokens import Emoji, Separator, Icon
+from cli.tokens import Emoji, Separator, Icon, Color
 from typing import Literal, ClassVar, get_args
-
-GREEN = "\033[32m"
-RED = "\033[31m"
-CYAN = "\033[36m"
-GREY  = "\033[90m"
-RESET = "\033[0m"
 
 @dataclass
 class Template():
@@ -60,9 +54,7 @@ class Prompt(Component):
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "depth_input": (
         Template()
-        # .message(f"{CYAN}{EMOJI}{RESET} {{dir_path}} {CYAN}({{num}}){RESET}")
-        # .message(f"{CYAN}{EMOJI} {{num}}{RESET} {{dir_path}}")
-        .message(f"{CYAN}{EMOJI} {{num}}{RESET}")
+        .message(f"{Color.CYAN}{EMOJI} {{num}}{Color.RESET}")
         .padding(18)
         .message("{dir_path}")
         )
@@ -161,15 +153,15 @@ class Notifications(Component):
         ),
         "op_done": (
             Template()
-            .token(f"{GREEN}{Icon.CHECKMARK}{RESET}")
+            .token(f"{Color.GREEN}{Icon.CHECKMARK}{Color.RESET}")
             .token(SEPARATOR)
             .message(f"Done")
-            .padding(35)
+            .padding(42)
             .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
         ),
         "op_failed": (
             Template()
-            .token(f"{RED}{Icon.CROSSMARK}{RESET}")
+            .token(f"{Color.RED}{Icon.CROSSMARK}{Color.RESET}")
             .token(SEPARATOR)
             .message("Failed")
             .padding(35)
@@ -177,14 +169,14 @@ class Notifications(Component):
         ),
         "save_done": (
             Template()
-            .token(f"{GREEN}{Icon.CHECKMARK}{RESET}")
+            .token(f"{Color.GREEN}{Icon.CHECKMARK}{Color.RESET}")
             .token(SEPARATOR)
             .padding(22)
             .message("| {path}")
         ),
         "save_failed": (
             Template()
-            .token(f"{RED}{Icon.CROSSMARK}{RESET}")
+            .token(f"{Color.RED}{Icon.CROSSMARK}{Color.RESET}")
             .token(SEPARATOR)
             .message("{reason:>9} | {path}")
         ),

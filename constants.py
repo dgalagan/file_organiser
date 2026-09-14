@@ -27,12 +27,6 @@ OUTPUT_DIR_PATH = os.path.join(PROJECT_ROOT, OUTPUT_DIR)
 class Cols:
 
     ROOT = "Root"
-    ROOT_INVALID = "RootInvalid"
-    ROOT_DUP = "RootDup"
-    ROOT_EMPTY = "RootEmpty"
-    ROOT_SELECTED = "RootSelected"
-    ROOT_DEPTH = "RootDepth"
-    ROOT_TREE_DEPTH = "RootTreeDepth"
     ROOT_PROCESSING_DEPTH = "ProcessingDepth"
     FILE_NAME = "FileName"
     FILE_STEM = "FileStem"

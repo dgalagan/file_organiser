@@ -1,6 +1,7 @@
 from enum import StrEnum, auto
 from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
 from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
+from cli.tokens import Color
 from core.parser import DateParser
 from core.config import Config, Cache, Exif, Reference
 from core.categories import Category, CategorySelection
@@ -29,14 +30,13 @@ from collections import defaultdict
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
-# [info] dir_position: dir's depth from drive (global reference)
-# [info] dir_depth: deepest layer below dir, where dir itself is 0
 
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
-# [scan_directories] supply dir and files container externally
+# [scan_directories] try while loop / stack approach
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
+# [df] ensure coherence of dtypes
 
 EXIFTOOL_PATH = "D:/Development/Software/Projects/file_organiser/bin/exif/exiftool(-k).exe"
 EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
@@ -62,9 +62,15 @@ INDENT = "  "
 
 @dataclass
 class DirInfo:
-    dir_path: str
-    dir_position: int
-    dir_depth: int
+    path: str
+    level: int # position on the global ruler (levels from drive)
+    depth: int # subtree depth below dir (dir itself = 0)
+
+@dataclass
+class DirProcessingInfo:
+    info: DirInfo
+    covered_depth: int #  layers covered by a parent (dir = 0)
+    processing_depth: int # level to which the dir is traversed (0 = dir only)
 
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -77,133 +83,138 @@ class MenuActions(StrEnum):
 ###############################
 ########### HELPERS ###########
 ###############################
-def validate_dirs(roots: list[str]) -> list[tuple[str, int, int]]:
-    unique_roots = set(os.path.normpath(root) for root in roots)
-    result = []
-    for root in unique_roots:
-        if not is_dir(root) or is_empty(root):
+def get_dirs_info(dir_paths: list[str]) -> list[DirInfo]:
+    unique_dir_paths = set(os.path.normpath(dir_path) for dir_path in dir_paths)
+    dirs_info = []
+    for dir_path in unique_dir_paths:
+        if not is_dir(dir_path) or is_empty(dir_path):
             continue
-        dir_position = depth_from_drive(root) 
-        dir_depth = tree_depth(root)
-        result.append((root, dir_position, dir_depth))
-    return result
-# try while loop / stack approach
-def show_dirs_tree(roots_data: list[tuple[str, int, int]], coverage_bar: dict[str: str] = None) -> None:
+        dirs_info.append(DirInfo(dir_path, depth_from_drive(dir_path), tree_depth(dir_path)))
+    return dirs_info
+
+def show_dirs_tree(dirs_info: list[DirInfo], depth_bar: dict[str: str]) -> None:
     # Containers
     dir_structure = []
-    seen = []
+    prior_dirs_info = []
     # Sort by path name
-    sorted_data = sorted(roots_data, key=lambda root_data: root_data[0])
-
+    sorted_dirs_info = sorted(dirs_info, key=lambda dir_info: dir_info.path)
     # Execution
-    for root, dir_position, dir_depth in sorted_data:
+    for dir_info in sorted_dirs_info:
+        path = dir_info.path
+        depth = dir_info.depth
+        # Check parents in seen
         parent = None
-        parent_position = -1
+        parent_lvl = -1
         parent_count = 0
-        for seen_root, seen_dir_position, _ in seen:
-            if is_parent(seen_root, root):
+        for prior_dir_info in prior_dirs_info:
+            prior_path = prior_dir_info.path
+            prior_lvl = prior_dir_info.level
+            if is_parent(prior_path, path):
                 parent_count += 1
-                if seen_dir_position > parent_position:
-                    parent, parent_position = seen_root, seen_dir_position
-        bar = coverage_bar.get(root, (dir_depth + 1) * "|")
-        pad = " " * max(0, 20 - dir_depth + 1)
+                if prior_lvl > parent_lvl:
+                    parent, parent_lvl = prior_path, prior_lvl
+        bar = depth_bar.get(path, (depth + 1) * "|")
+        pad = " " * max(0, 20 - depth + 1)
         if parent:
-            rel_path = os.path.relpath(root, parent)
+            rel_path = os.path.relpath(path, parent)
             dir_structure.append(f"{bar}{pad}{parent_count * '  '}|_{rel_path}")
         else:
-            dir_structure.append(f"{bar}{pad}{root}")
-        seen.append((root, dir_position, dir_depth))
+            dir_structure.append(f"{bar}{pad}{path}")
+        prior_dirs_info.append(dir_info)
 
     # Print tree
     print("\n".join(dir_structure))
 
-def select_dirs(roots_data: list[tuple[str, int, int]]) -> list[tuple[str, int]]: # dependency: get_depth_input() 
+def get_dirs_processing_info(dirs_info: list[DirInfo]) -> list[DirProcessingInfo]: # dependency: get_dir_processing_depth() 
     # Depth bar colors
-    input_color =  "\033[1;38;5;34m"
-    covered_color = "\033[1;38;5;157m"
-    uncovered_color = "\033[90m"
-    reset = "\033[0m"
+    input_color = Color.GREEN
+    covered_color = Color.LIGHT_GREEN
+    uncovered_color = Color.GREY
+    reset = Color.RESET
     # Containers
-    result = []
-    seen = []
+    dirs_processing_info: list[DirProcessingInfo] = []
     depth_bar = {}
     # Sort by path name
-    sorted_data = sorted(roots_data, key=lambda root_data: root_data[1]) # by dir depth
+    sorted_dirs_info = sorted(dirs_info, key=lambda dir_info: dir_info.path)
 
     print(f"\nInput tree")
-    show_dirs_tree(roots_data, coverage_bar=depth_bar)
+    show_dirs_tree(dirs_info, depth_bar=depth_bar)
 
     print("\n".join(["\nSelect processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
     interrupt = False
-    for root, dir_position, dir_depth in sorted_data:
-        # Check parents in seen 
+    for dir_info in sorted_dirs_info:
+        path = dir_info.path
+        lvl = dir_info.level
+        depth = dir_info.depth
+        # Check parents in processed
         parent = None
-        parent_position = -1
-        parent_depth_input = -1
-        for seen_root, seen_dir_position, seen_depth_input in seen:
-            if is_parent(seen_root, root) and seen_dir_position > parent_position:
-                parent, parent_position, parent_depth_input = seen_root, seen_dir_position, seen_depth_input
+        parent_lvl = -1
+        parent_processing_depth = -1
+        for dir_processing_info in dirs_processing_info:
+            prior_path = dir_processing_info.info.path
+            prior_lvl = dir_processing_info.info.level
+            if is_parent(prior_path, path) and prior_lvl > parent_lvl:
+                parent, parent_lvl, parent_processing_depth = prior_path, prior_lvl, dir_processing_info.processing_depth
         # Estimate how many layers were covered by parent 
         covered_depth = -1
         if parent:
-            parent_processing_depth = parent_position + parent_depth_input
-            child_max_depth = dir_position + dir_depth
-            if parent_processing_depth >= dir_position:
-                if parent_processing_depth < child_max_depth:
-                    covered_depth = parent_processing_depth - dir_position
+            parent_processing_lvl = parent_lvl + parent_processing_depth
+            child_max_lvl = lvl + depth
+            if parent_processing_lvl >= lvl:
+                if parent_processing_lvl < child_max_lvl:
+                    covered_depth = parent_processing_lvl - lvl
                 else:
-                    covered = covered_color + "|" * (dir_depth + 1) + reset
-                    depth_bar[root] = covered
+                    covered = covered_color + "|" * (depth + 1) + reset
+                    depth_bar[path] = covered
                     continue
         # Generate bar for interrupt case 
         if interrupt:
             covered = covered_color + "|" * covered_depth + reset
-            uncovered = uncovered_color + '|' * (dir_depth - covered_depth) + reset
-            depth_bar[root] = covered + uncovered
+            uncovered = uncovered_color + '|' * (depth - covered_depth) + reset
+            depth_bar[path] = covered + uncovered
             continue
         # Get user input
-        depth_range = [covered_depth + 1, dir_depth]
-        depth_input, in_action = get_depth_input(root, depth_range)
+        depth_range = [covered_depth + 1, depth]
+        processing_depth, in_action = get_dir_processing_depth(path, depth_range)
 
         covered = covered_color + "|" * (covered_depth + 1) + reset
-        if depth_input >= 0:
-            user = input_color + '|' * (depth_input - covered_depth) + reset
-            uncovered = uncovered_color + '|' * (dir_depth - depth_input) + reset
+        if processing_depth >= 0:
+            user = input_color + '|' * (processing_depth - covered_depth) + reset
+            uncovered = uncovered_color + '|' * (depth - processing_depth) + reset
         else:
             user = ''
-            uncovered = uncovered_color + '|' * (dir_depth - covered_depth) + reset
-        depth_bar[root] = covered + user + uncovered
+            uncovered = uncovered_color + '|' * (depth - covered_depth) + reset
+        depth_bar[path] = covered + user + uncovered
 
         match in_action:
             case MenuActions.SKIP:
                 continue
             case MenuActions.SUCCESS:
-                result.append((root, covered_depth + 1, depth_input))
-                seen.append((root, dir_position, depth_input))
+                dirs_processing_info.append(DirProcessingInfo(dir_info, covered_depth, processing_depth))
             case MenuActions.INTERRUPT:
                 interrupt = True
 
-    if not result:
+    if not dirs_processing_info:
         raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
 
     print(f"\nOutput tree")
-    show_dirs_tree(sorted_data, coverage_bar=depth_bar)
+    show_dirs_tree(dirs_info, depth_bar=depth_bar)
     
-    return result
+    return dirs_processing_info
 
-def get_depth_input(root: str, depth_range: list[int]) -> tuple[int, StrEnum]: # dependency: select_dirs()
+def get_dir_processing_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: # dependency: get_dirs_processing_info()
 
-    depth_level = f"{depth_range[0]}-{depth_range[1]}" if depth_range[0] != depth_range[1] else depth_range[0]
+    range_str = f"{depth_range[0]}-{depth_range[1]}" if depth_range[0] != depth_range[1] else depth_range[0]
 
     while True:
         try:
-            print(f"{INDENT}{Prompt.ELEMENTS["depth_input"].build(dir_path=root, num=depth_level)}")
-            depth_input = input(f"{INDENT*5} \\__depth: ")
-            if depth_input == "":
+            print(f"{INDENT}{Prompt.ELEMENTS["depth_input"].build(dir_path=dir_path, num=range_str)}")
+            processing_depth = input(f"{INDENT*5} \\__depth: ")
+            if processing_depth == "":
                 return -1, MenuActions.SKIP
-            depth_input = int(depth_input)
-            if depth_range[0] <= depth_input <= depth_range[1]:
-                return depth_input, MenuActions.SUCCESS
+            processing_depth = int(processing_depth)
+            if depth_range[0] <= processing_depth <= depth_range[1]:
+                return processing_depth, MenuActions.SUCCESS
             print(Warnings.ELEMENTS["invalid_input"].build())
             continue
         except ValueError:
@@ -212,7 +223,6 @@ def get_depth_input(root: str, depth_range: list[int]) -> tuple[int, StrEnum]: #
         except KeyboardInterrupt:
             print()
             return -1, MenuActions.INTERRUPT
-
 
 def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
     dirs_to_del = defaultdict(set)
@@ -402,17 +412,18 @@ def organise(
     date_parser = config.parser
 
     # Validate and select source roots
-    roots_with_depth = validate_dirs(src_roots)
-    roots_selected = select_dirs(roots_with_depth)
+    roots_info = get_dirs_info(src_roots)
+    roots_processing_info = get_dirs_processing_info(roots_info)
 
     # Extract files to process
     file_records = []
-    for root, starting_depth, processing_depth in roots_selected:
-        root_files = []
-        for depth, dir, filenames in iter_dir_tree(root, starting_depth, processing_depth):
+    for root_processing_info in roots_processing_info:
+        path = root_processing_info.info.path
+        covered_depth = root_processing_info.covered_depth
+        processing_depth = root_processing_info.processing_depth
+        for depth, dir, filenames in iter_dir_tree(path, covered_depth + 1, processing_depth):
             for filename in filenames:
-                root_files.append((root, processing_depth, dir, depth, filename))
-        file_records.extend(root_files)
+                file_records.append((path, processing_depth, dir, depth, filename))
 
     # Pre-processing
     files_df = pd.DataFrame(file_records, columns=[Cols.ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
