@@ -1,12 +1,12 @@
 from enum import StrEnum, auto
-from core.pipelines import validate_dirs, add_depth_metrics, assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
+from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
 from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
-from cli.tokens import CYAN, RESET
 from core.parser import DateParser
 from core.config import Config, Cache, Exif, Reference
 from core.categories import Category, CategorySelection
 from core.tagstore import TagStore
 from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
+from dataclasses import dataclass
 from dataframe.pipeline import FilterRows
 from dataframe.col_filter import ColumnFilter, NameFilter, KeywordFilter, CombinedFilter
 from dataframe.predicate import Condition, And
@@ -19,7 +19,7 @@ from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
 from typing import Callable, Literal
-from utils.path import iter_dir_tree, is_parent, depth_from_dir, move, copy
+from utils.path import iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
 from utils.text import uppercase_text
 from collections import defaultdict
 
@@ -29,6 +29,9 @@ from collections import defaultdict
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
+# [info] dir_position: dir's depth from drive (global reference)
+# [info] dir_depth: deepest layer below dir, where dir itself is 0
+
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
 # [scan_directories] supply dir and files container externally
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
@@ -57,6 +60,12 @@ DIR_SCHEMA = {
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 INDENT = "  "
 
+@dataclass
+class DirInfo:
+    dir_path: str
+    dir_position: int
+    dir_depth: int
+
 class MenuActions(StrEnum):
     EXIT = auto()
     INTERRUPT = auto()
@@ -68,27 +77,132 @@ class MenuActions(StrEnum):
 ###############################
 ########### HELPERS ###########
 ###############################
+def validate_dirs(roots: list[str]) -> list[tuple[str, int, int]]:
+    unique_roots = set(os.path.normpath(root) for root in roots)
+    result = []
+    for root in unique_roots:
+        if not is_dir(root) or is_empty(root):
+            continue
+        dir_position = depth_from_drive(root) 
+        dir_depth = tree_depth(root)
+        result.append((root, dir_position, dir_depth))
+    return result
+# try while loop / stack approach
+def show_dirs_tree(roots_data: list[tuple[str, int, int]], coverage_bar: dict[str: str] = None) -> None:
+    # Containers
+    dir_structure = []
+    seen = []
+    # Sort by path name
+    sorted_data = sorted(roots_data, key=lambda root_data: root_data[0])
 
-def set_processing_depth(root: str, branch_depth: int) -> tuple[int | None, StrEnum]: # dependency: select_processing_targets()
+    # Execution
+    for root, dir_position, dir_depth in sorted_data:
+        parent = None
+        parent_position = -1
+        parent_count = 0
+        for seen_root, seen_dir_position, _ in seen:
+            if is_parent(seen_root, root):
+                parent_count += 1
+                if seen_dir_position > parent_position:
+                    parent, parent_position = seen_root, seen_dir_position
+        bar = coverage_bar.get(root, (dir_depth + 1) * "|")
+        pad = " " * max(0, 20 - dir_depth + 1)
+        if parent:
+            rel_path = os.path.relpath(root, parent)
+            dir_structure.append(f"{bar}{pad}{parent_count * '  '}|_{rel_path}")
+        else:
+            dir_structure.append(f"{bar}{pad}{root}")
+        seen.append((root, dir_position, dir_depth))
+
+    # Print tree
+    print("\n".join(dir_structure))
+
+def select_dirs(roots_data: list[tuple[str, int, int]]) -> list[tuple[str, int]]: # dependency: get_depth_input() 
+    # Depth bar colors
+    input_color =  "\033[1;38;5;34m"
+    covered_color = "\033[1;38;5;157m"
+    uncovered_color = "\033[90m"
+    reset = "\033[0m"
+    # Containers
+    result = []
+    seen = []
+    depth_bar = {}
+    # Sort by path name
+    sorted_data = sorted(roots_data, key=lambda root_data: root_data[1]) # by dir depth
+
+    print(f"\nInput tree")
+    show_dirs_tree(roots_data, coverage_bar=depth_bar)
+
+    print("\n".join(["\nSelect processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
+    interrupt = False
+    for root, dir_position, dir_depth in sorted_data:
+        # Check parents in seen 
+        parent = None
+        parent_position = -1
+        parent_depth_input = -1
+        for seen_root, seen_dir_position, seen_depth_input in seen:
+            if is_parent(seen_root, root) and seen_dir_position > parent_position:
+                parent, parent_position, parent_depth_input = seen_root, seen_dir_position, seen_depth_input
+        # Estimate how many layers were covered by parent 
+        covered_depth = -1
+        if parent:
+            parent_processing_depth = parent_position + parent_depth_input
+            child_max_depth = dir_position + dir_depth
+            if parent_processing_depth >= dir_position:
+                if parent_processing_depth < child_max_depth:
+                    covered_depth = parent_processing_depth - dir_position
+                else:
+                    covered = covered_color + "|" * (dir_depth + 1) + reset
+                    depth_bar[root] = covered
+                    continue
+        # Generate bar for interrupt case 
+        if interrupt:
+            covered = covered_color + "|" * covered_depth + reset
+            uncovered = uncovered_color + '|' * (dir_depth - covered_depth) + reset
+            depth_bar[root] = covered + uncovered
+            continue
+        # Get user input
+        depth_range = [covered_depth + 1, dir_depth]
+        depth_input, in_action = get_depth_input(root, depth_range)
+
+        covered = covered_color + "|" * (covered_depth + 1) + reset
+        if depth_input >= 0:
+            user = input_color + '|' * (depth_input - covered_depth) + reset
+            uncovered = uncovered_color + '|' * (dir_depth - depth_input) + reset
+        else:
+            user = ''
+            uncovered = uncovered_color + '|' * (dir_depth - covered_depth) + reset
+        depth_bar[root] = covered + user + uncovered
+
+        match in_action:
+            case MenuActions.SKIP:
+                continue
+            case MenuActions.SUCCESS:
+                result.append((root, covered_depth + 1, depth_input))
+                seen.append((root, dir_position, depth_input))
+            case MenuActions.INTERRUPT:
+                interrupt = True
+
+    if not result:
+        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
+
+    print(f"\nOutput tree")
+    show_dirs_tree(sorted_data, coverage_bar=depth_bar)
     
-    if not isinstance(branch_depth, int) or isinstance(branch_depth, bool):
-        raise TypeError(f"branch_depth must be an int, got {type(branch_depth).__name__}")
+    return result
 
-    if branch_depth < 0:
-        raise ValueError(f"branch_depth must be non-negative, got {branch_depth}")
+def get_depth_input(root: str, depth_range: list[int]) -> tuple[int, StrEnum]: # dependency: select_dirs()
 
-    depth_level = f"0-{branch_depth}" if branch_depth else "0"
-
-    # path truncation
+    depth_level = f"{depth_range[0]}-{depth_range[1]}" if depth_range[0] != depth_range[1] else depth_range[0]
 
     while True:
         try:
             print(f"{INDENT}{Prompt.ELEMENTS["depth_input"].build(dir_path=root, num=depth_level)}")
-            depth_input = input(f"{INDENT}{INDENT}  \\__depth: ")
+            depth_input = input(f"{INDENT*5} \\__depth: ")
             if depth_input == "":
-                return None, MenuActions.SKIP
+                return -1, MenuActions.SKIP
             depth_input = int(depth_input)
-            if 0 <= depth_input <= branch_depth:
+            if depth_range[0] <= depth_input <= depth_range[1]:
                 return depth_input, MenuActions.SUCCESS
             print(Warnings.ELEMENTS["invalid_input"].build())
             continue
@@ -97,62 +211,8 @@ def set_processing_depth(root: str, branch_depth: int) -> tuple[int | None, StrE
             continue
         except KeyboardInterrupt:
             print()
-            return None, MenuActions.INTERRUPT
+            return -1, MenuActions.INTERRUPT
 
-def select_roots(df: pd.DataFrame) -> pd.DataFrame: # dependency: set_processing_depth()
-    
-    # pandas does not store Python int natively, so the only way to extract int is to call .item() on np.intXX(a) stored in pandas
-    # map, apply in the DF Processor returns DF with irrelevant Col name that i reassign to relevant. Potential issues with dtypes
-    
-    # Sort values from highest to lowest level dirs
-    df = df.sort_values(Cols.ROOT_DEPTH, ascending=True)
-    df[Cols.ROOT_SELECTED] = False
-
-    pending = list(df.index)
-    skipped_child = []
-    summary = []
-    print("\n".join(["Select processing depth per directory", f"{INDENT}[0-N]    Set processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
-    for pos, row_id in enumerate(pending):
-        if row_id in skipped_child:
-            continue
-        src_root = df.loc[row_id, Cols.ROOT]
-        tree_depth = int(df.loc[row_id, Cols.ROOT_TREE_DEPTH])
-        # Get user input on required processing depth
-        processing_depth, in_action = set_processing_depth(src_root, tree_depth)
-        match in_action:
-            case MenuActions.SKIP:
-                summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=src_root, reason="by user")}") #--- Notification ---
-                continue
-            case MenuActions.SUCCESS:
-                df.loc[row_id, Cols.ROOT_SELECTED] = True
-                df.loc[row_id, Cols.ROOT_PROCESSING_DEPTH] = processing_depth
-                summary.append(f"{INDENT}{Notifications.ELEMENTS["root_selected"].build(dir_path=src_root)}") #--- Notification ---
-            case MenuActions.INTERRUPT:
-                summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=src_root, reason="by user")}") #--- Notification ---
-                for next_row_id in pending[pos+1:]:
-                    skipped_path = df.at[next_row_id, Cols.ROOT]
-                    summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=skipped_path, reason="by user")}") #--- Notification ---
-                break
-        # Check if child exist next to the
-        for next_row_id in pending[pos+1:]:
-            if next_row_id in skipped_child:
-                continue
-            pending_child = df.at[next_row_id, Cols.ROOT]
-            if is_parent(src_root, pending_child):
-                child_depth = depth_from_dir(pending_child, src_root)
-                if child_depth <= processing_depth:
-                    skipped_child.append(next_row_id)
-                    summary.append(f"{INDENT}{Notifications.ELEMENTS["root_skipped"].build(dir_path=pending_child, reason="as child")}") #--- Notification ---
-
-    if df[Cols.ROOT_SELECTED].loc[df[Cols.ROOT_SELECTED]].empty:
-        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
-
-    #--- Notification ---
-    print("\nSelection summary")
-    print("\n".join(summary))
-    #--- Notification ---
-    
-    return df
 
 def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
     dirs_to_del = defaultdict(set)
@@ -342,30 +402,16 @@ def organise(
     date_parser = config.parser
 
     # Validate and select source roots
-    src_roots_df = pd.DataFrame({Cols.ROOT: [src_roots] if isinstance(src_roots, str) else src_roots})
-    src_roots_df = validate_dirs().run(src_roots_df)
-    src_roots_df = FilterRows(
-        And([
-            Condition(Cols.ROOT_INVALID, "eq", False),
-            Condition(Cols.dup(Cols.ROOT), "eq", False),
-            Condition(Cols.ROOT_EMPTY, "eq", False)
-        ])
-    ).run(src_roots_df)
-    if src_roots_df.empty:
-        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
-    src_roots_df = add_depth_metrics().run(src_roots_df)
-    src_roots_df = select_roots(src_roots_df)
-    src_roots_df = FilterRows(Condition(Cols.ROOT_SELECTED, "eq", True)).run(src_roots_df)
+    roots_with_depth = validate_dirs(src_roots)
+    roots_selected = select_dirs(roots_with_depth)
 
     # Extract files to process
     file_records = []
-    for row_id in src_roots_df.index:
-        src_root = src_roots_df.loc[row_id, Cols.ROOT]
-        processing_depth = src_roots_df.loc[row_id, Cols.ROOT_PROCESSING_DEPTH]
+    for root, starting_depth, processing_depth in roots_selected:
         root_files = []
-        for depth, dir, filenames in iter_dir_tree(src_root, processing_depth):
+        for depth, dir, filenames in iter_dir_tree(root, starting_depth, processing_depth):
             for filename in filenames:
-                root_files.append((src_root, processing_depth, dir, depth, filename))
+                root_files.append((root, processing_depth, dir, depth, filename))
         file_records.extend(root_files)
 
     # Pre-processing
@@ -499,9 +545,10 @@ def main(command: str = "organise"):
     category_selection = CategorySelection(categories=all_categories).get()
 
     if command == "organise":
-        result_df = organise(
-            src_roots=["D:\\OneDrive"],
+       organise(
+            # src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
             # src_roots=["D:\\MyOrganizedFiles1"],
+            src_roots = ["D:\\OneDrive"],
             dest_root="D:\\MyOrganizedFiles",
             operation=copy,
             config=config,
@@ -511,7 +558,7 @@ def main(command: str = "organise"):
         )
 
     elif command == "restore":
-        result_df = restore(
+        restore(
             report_name="organise_20260831T182240.csv",
             operation=move,
             config=config

@@ -5,7 +5,7 @@ RED = "\033[31m"
 CYAN = "\033[36m"
 RESET = "\033[0m"
 
-class Token(str, Enum):
+class Token:
 
     def repeat_with_delim(self, count: int, delim: str = "") -> str:
         if not isinstance(count, int) or count < 1:
@@ -58,7 +58,7 @@ class Emoji(Token):
 class Icon(Token):
     CHECKMARK =          "[✓]"
     CROSSMARK =          "[✗]"
-    INPUT =              f"{CYAN}-->{RESET}"
+    INPUT =              "-->"
     GREATERTHAN =        "[>]"
     INFORMATION =        "[i]"
     

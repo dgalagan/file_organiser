@@ -6,7 +6,7 @@ from dataframe.predicate import Predicate, Condition, And, Or, AllRows
 from core.tagstore import TagStore
 import datetime as dt
 import pandas as pd
-from utils.path import is_not_dir, is_empty, get_normalized_path, depth_from_drive, tree_depth, parse_filename
+from utils.path import parse_filename
 from utils.text import uppercase_text
 import os
 import hashlib
@@ -123,28 +123,6 @@ def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> 
 ###############################
 #### DF PIPELINE FUNCTIONS ####
 ###############################
-
-### SRC ROOT
-
-def validate_dirs():
-    return Pipeline(
-        [
-            Compute(ElementProcessor(get_normalized_path), NameFilter(Cols.ROOT)),
-            Compute(ElementProcessor(is_not_dir), NameFilter(Cols.ROOT), dest_col=Cols.ROOT_INVALID),
-            Compute(ElementProcessor(is_empty), NameFilter(Cols.ROOT), dest_col=Cols.ROOT_EMPTY, where=Condition(Cols.ROOT_INVALID, "eq", False)),
-            Compute(ColProcessor(duplicated, keep="first"), NameFilter(Cols.ROOT), dest_col=Cols.dup(Cols.ROOT)),
-        ]
-    )
-
-def add_depth_metrics():
-    return Pipeline(
-        [
-            Compute(ElementProcessor(depth_from_drive), NameFilter(Cols.ROOT), dest_col=Cols.ROOT_DEPTH),
-            Compute(ElementProcessor(tree_depth), NameFilter(Cols.ROOT), dest_col=Cols.ROOT_TREE_DEPTH),
-        ]
-    )
-
-### FILES
 
 def assemble_file_path(prefix: Literal["", "Dest"], tagstore: TagStore = None):
 

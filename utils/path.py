@@ -2,7 +2,7 @@ import ctypes
 import os
 import shutil
 from typing import Iterable, Iterator
-from utils.text import strip_text, lstrip_text, split_text, count_letters, uppercase_text
+from utils.text import strip_text, lstrip_text, rstrip_text, split_text, count_letters, uppercase_text
 
 # General
 def get_drive(path: str) -> str:
@@ -27,32 +27,30 @@ def get_normalized_path(path: str, path_separator: str = os.sep) -> str:
         return normalized_path + ":" + path_separator 
     return normalized_path
 
-def components_count(path: str, path_separator: str = os.sep):
+def path_depth(path: str, path_separator: str = os.sep):
     # remove heading\trailing path separators like "\\folder", "folder\\"
     normalized_path = strip_text(path, char_to_remove=path_separator)
     # split path into list of parts
     path_parts = split_text(normalized_path, path_separator)
     return len(path_parts) # implement empty normalized path case
 
-def depth_from_dir(path: str, of_path: str):
-    rel_path = os.path.relpath(path, of_path)
+def depth_from_path(path: str, from_path: str):
+    rel_path = os.path.relpath(path, from_path)
     if rel_path == os.curdir:
         return 0
-    #add parent check
-    return components_count(rel_path)
+    return path_depth(rel_path)
 
 def depth_from_drive(path: str): # drive is 0 level
-    if not os.path.isabs(path):
-        raise ValueError(f"expected a abs path, got: {path!r}")
+    path = rstrip_text(path, char_to_remove=os.sep)
     drive, rest = os.path.splitdrive(path)
-    return components_count(rest)
+    rel_path = os.path.relpath(path, drive)
+    if rel_path == os.curdir:
+        return 0
+    return path_depth(rest)
 
 # File specific
 def is_file(path: str) -> bool:
     return os.path.isfile(path)
-
-def is_not_file(path: str) -> bool:
-    return not os.path.isfile(path)
 
 def is_readonly(path: str) -> bool:
     FILE_ATTRIBUTE_READONLY = 0x1
@@ -84,7 +82,7 @@ def is_accessible(path: str) -> bool:
         return False
 
 def get_file_dir(path: str) -> str:
-    if is_not_file(path):
+    if not is_file(path):
         raise FileNotFoundError(f"No such file: {path}")   
     return os.path.dirname(path)
 
@@ -121,39 +119,37 @@ def copy(src_path: str, dest_path: str):
 def is_dir(path:str) -> bool:
     return os.path.isdir(path)
 
-def is_not_dir(path:str) -> bool:
-    return not os.path.isdir(path)
-
 def is_empty(path:str) -> bool:
-    if is_not_dir(path):
+    if not is_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     return not os.listdir(path)
 
 def is_parent(path: str, of_path: str) -> bool:
-    if is_not_dir(path) or is_not_dir(of_path):
+    if not  is_dir(path) or not is_dir(of_path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     common_path = get_common_path([path, of_path]) 
     return path == common_path and path != of_path
 
 def tree_depth(path: str) -> int:
-    if is_not_dir(path):
+    if not is_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     
     return max(
-        depth_from_dir(root, path)
+        depth_from_path(root, path)
         for root, _ , _ in os.walk(path)
     )
 
-def iter_dir_tree(path: str, max_relative_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
+def iter_dir_tree(path: str, min_rel_depth: int = 0, max_rel_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
     
-    if is_not_dir(path):
+    if not is_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     
     for root, dirs, files in os.walk(path):
         
-        relative_depth = depth_from_dir(root, path)
-        
-        if relative_depth >= max_relative_depth:
+        relative_depth = depth_from_path(root, path)
+
+        if relative_depth >= max_rel_depth:
             dirs[:] = []
-        
-        yield relative_depth, root, files
+
+        if relative_depth >= min_rel_depth:
+            yield relative_depth, root, files

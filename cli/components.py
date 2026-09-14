@@ -5,6 +5,7 @@ from typing import Literal, ClassVar, get_args
 GREEN = "\033[32m"
 RED = "\033[31m"
 CYAN = "\033[36m"
+GREY  = "\033[90m"
 RESET = "\033[0m"
 
 @dataclass
@@ -28,7 +29,6 @@ class Template():
                 self.construct.remove(item)
         self.construct.append(("".join(to_collapse), num, align))
         return self
-    
     # String items assembly
     def build(self, **kwargs):
         result = ""
@@ -53,16 +53,18 @@ class Component():
 class Prompt(Component):
 
     START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = Icon.INPUT
+    EMOJI:  ClassVar[str] = Icon.GREATERTHAN
     SEPARATOR: ClassVar[str] = Separator.SPACE
 
     Options = Literal["depth_input"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "depth_input": (
         Template()
-        .token(EMOJI)
-        .token(SEPARATOR)
-        .message(f"{{dir_path}} {CYAN}({{num}}){RESET}")
+        # .message(f"{CYAN}{EMOJI}{RESET} {{dir_path}} {CYAN}({{num}}){RESET}")
+        # .message(f"{CYAN}{EMOJI} {{num}}{RESET} {{dir_path}}")
+        .message(f"{CYAN}{EMOJI} {{num}}{RESET}")
+        .padding(18)
+        .message("{dir_path}")
         )
     }
 
@@ -133,21 +135,8 @@ class Notifications(Component):
     EMOJI:  ClassVar[str] = ""
     SEPARATOR: ClassVar[str] = Separator.SPACE
     
-    Options = Literal["root_selected", "root_skipped", "root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done", "save_failed"]
+    Options = Literal["root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done", "save_failed"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "root_selected": (
-            Template()
-            .token(f"{GREEN}{Icon.CHECKMARK}{RESET}")
-            .token(SEPARATOR)
-            .padding(22)
-            .message(" | {dir_path}")
-        ),
-        "root_skipped": (
-            Template()
-            .token(f"{RED}{Icon.CROSSMARK}{RESET}")
-            .token(SEPARATOR)
-            .message("{reason:>9} | {dir_path}")
-        ),
         "root_stat": (
             Template()
             .token(Icon.INFORMATION)
