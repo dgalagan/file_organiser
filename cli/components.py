@@ -127,13 +127,12 @@ class Notifications(Component):
     EMOJI:  ClassVar[str] = ""
     SEPARATOR: ClassVar[str] = Separator.SPACE
     
-    Options = Literal["root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done", "save_failed"]
+    Options = Literal["root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "root_stat": (
             Template()
             .token(Icon.INFORMATION)
-            .token(SEPARATOR)
-            .message("{n:>9,} | {dir_path}")
+            .message("{n:^17,}{dir_path}")
         ),
         "cache_load": (
             Template()
@@ -169,16 +168,9 @@ class Notifications(Component):
         ),
         "save_done": (
             Template()
-            .token(f"{Color.GREEN}{Icon.CHECKMARK}{Color.RESET}")
-            .token(SEPARATOR)
-            .padding(22)
-            .message("| {path}")
-        ),
-        "save_failed": (
-            Template()
-            .token(f"{Color.RED}{Icon.CROSSMARK}{Color.RESET}")
-            .token(SEPARATOR)
-            .message("{reason:>9} | {path}")
+            # .token(f"{Color.GREEN}{Icon.CHECKMARK}{Color.RESET}")
+            # .padding(20)
+            .message("Summary saved -> {path}")
         ),
     }
 

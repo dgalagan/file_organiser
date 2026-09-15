@@ -139,7 +139,7 @@ def tree_depth(path: str) -> int:
         for root, _ , _ in os.walk(path)
     )
 
-def iter_dir_tree(path: str, min_rel_depth: int = 0, max_rel_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
+def iter_dir_tree(path: str, start_depth: int = 0, target_depth: int = 0) -> Iterator[tuple[int, str, str]]: # depth starting index 0 vs 1 ?
     
     if not is_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
@@ -148,8 +148,8 @@ def iter_dir_tree(path: str, min_rel_depth: int = 0, max_rel_depth: int = 0) -> 
         
         relative_depth = depth_from_path(root, path)
 
-        if relative_depth >= max_rel_depth:
+        if relative_depth >= target_depth:
             dirs[:] = []
 
-        if relative_depth >= min_rel_depth:
+        if relative_depth >= start_depth:
             yield relative_depth, root, files

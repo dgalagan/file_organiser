@@ -10,7 +10,7 @@ from utils.path import parse_filename
 from utils.text import uppercase_text
 import os
 import hashlib
-from constants import Cols, Tags
+from constants import Cols
 from typing import Literal
 from reverse_geocoder import RGeocoder
 

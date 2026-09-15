@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, get_args
 
 # all_categories = csv_loader.load(EXTENSION_MAP_PATH)[Cols.FILE_CATEGORY].drop_duplicates().to_list()
 Category = Literal[
@@ -9,8 +9,8 @@ Category = Literal[
 ]
 
 class CategorySelection:
-    def __init__(self, categories: list[str]):
-        self._state = {c: True for c in categories}
+    def __init__(self):
+        self._state = {c: True for c in get_args(Category)}
     # ui
     def toggle(self, category: str):
         self._state[category] = not self._state[category]

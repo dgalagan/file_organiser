@@ -25,7 +25,6 @@ OUTPUT_DIR = "output"
 OUTPUT_DIR_PATH = os.path.join(PROJECT_ROOT, OUTPUT_DIR)
 
 class Cols:
-
     ROOT = "Root"
     ROOT_PROCESSING_DEPTH = "ProcessingDepth"
     FILE_NAME = "FileName"

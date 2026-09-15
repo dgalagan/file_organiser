@@ -1,27 +1,27 @@
 from enum import StrEnum, auto
-from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
 from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
 from cli.tokens import Color
 from core.parser import DateParser
-from core.config import Config, Cache, Exif, Reference
+from core.cache import Cache
+from core.exif import Exif
 from core.categories import Category, CategorySelection
+from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
 from core.tagstore import TagStore
 from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
 from dataclasses import dataclass
 from dataframe.pipeline import FilterRows
 from dataframe.col_filter import ColumnFilter, NameFilter, KeywordFilter, CombinedFilter
-from dataframe.predicate import Condition, And
+from dataframe.predicate import Condition
 from dataframe.write import CSVWriter, JSONWriter
-from dataframe.load import CSVLoader, JSONLoader
+from dataframe.load import JSONLoader
 from datetime import datetime
 import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
-from typing import Callable, Literal, get_args
+from typing import Callable, Literal
 from utils.path import iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
-from utils.text import uppercase_text
 from collections import defaultdict
 
 ###############################
@@ -36,12 +36,12 @@ from collections import defaultdict
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
-# [df] ensure coherence of dtypes
+# [df] ensure coherence of dtypes between different steps in df processing
 # [categories] validate literal list against ref table
 
 EXIFTOOL_PATH = "D:/Development/Software/Projects/file_organiser/bin/exif/exiftool(-k).exe"
 EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
-EXIFTOOL_ENCOODING = "utf-8"
+EXIFTOOL_ENCODING = "utf-8"
 EXIFTOOL_BATCH_SIZE = 50
 META_DATE_TAGS: list[str] = [Tags.CREATE_DT, Tags.ACCESS_DT, Tags.MODIFY_DT]
 META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
@@ -62,16 +62,26 @@ TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 INDENT = "  "
 
 @dataclass
-class DirInfo:
+class Config:
+    register: Cache
+    metadata: Cache
+    ref: pd.DataFrame
+    exif: Exif
+    csv_writer: CSVWriter
+    geocoder: RGeocoder
+    parser: DateParser
+
+@dataclass
+class DirLoc:
     path: str
     level: int # position on the global ruler (levels from drive)
     depth: int # subtree depth below dir (dir itself = 0)
 
 @dataclass
-class DirProcessingInfo:
-    info: DirInfo
-    covered_depth: int #  layers covered by a parent (dir = 0)
-    processing_depth: int # level to which the dir is traversed (0 = dir only)
+class DirProcessingConfig:
+    loc: DirLoc
+    start_depth: int #  next layer following the layers covered by a parent (dir = 0)
+    target_depth: int # level to which the dir is traversed (0 = dir only)
 
 class MenuActions(StrEnum):
     EXIT = auto()
@@ -84,100 +94,99 @@ class MenuActions(StrEnum):
 ###############################
 ########### HELPERS ###########
 ###############################
-def get_dirs_info(dir_paths: list[str]) -> list[DirInfo]:
+def inspect_directories(dir_paths: list[str]) -> list[DirLoc]:
     unique_dir_paths = set(os.path.normpath(dir_path) for dir_path in dir_paths)
-    dirs_info = []
+    dir_locs = []
     for dir_path in unique_dir_paths:
         if not is_dir(dir_path) or is_empty(dir_path):
             continue
-        dirs_info.append(DirInfo(dir_path, depth_from_drive(dir_path), tree_depth(dir_path)))
-    return dirs_info
+        dir_locs.append(DirLoc(dir_path, depth_from_drive(dir_path), tree_depth(dir_path)))
+    return dir_locs
 
-def show_dirs_tree(dirs_info: list[DirInfo], depth_bar: dict[str: str]) -> None:
+def show_directories_tree(dir_locs: list[DirLoc], coverage_bar: dict[str, str] = None) -> None:
+    # Sort by path name
+    dir_locs = sorted(dir_locs, key=lambda dir_loc: dir_loc.path)
+    # Handle depth bar
+    coverage_bar = coverage_bar or {}
     # Containers
     dir_structure = []
-    prior_dirs_info = []
-    # Sort by path name
-    sorted_dirs_info = sorted(dirs_info, key=lambda dir_info: dir_info.path)
+    seen: list[DirLoc] = []
+
     # Execution
-    for dir_info in sorted_dirs_info:
-        path = dir_info.path
-        depth = dir_info.depth
+    for dir_loc in dir_locs:
+        path = dir_loc.path
+        depth = dir_loc.depth
         # Check parents in seen
         parent = None
         parent_lvl = -1
         parent_count = 0
-        for prior_dir_info in prior_dirs_info:
-            prior_path = prior_dir_info.path
-            prior_lvl = prior_dir_info.level
-            if is_parent(prior_path, path):
+        for seen_loc in seen:
+            seen_path = seen_loc.path
+            seen_lvl = seen_loc.level
+            if is_parent(seen_path, path):
                 parent_count += 1
-                if prior_lvl > parent_lvl:
-                    parent, parent_lvl = prior_path, prior_lvl
-        bar = depth_bar.get(path, (depth + 1) * "|")
-        pad = " " * max(0, 20 - depth + 1)
+                if seen_lvl > parent_lvl:
+                    parent, parent_lvl = seen_path, seen_lvl
+        bar = coverage_bar.get(path, (depth + 1) * "|")
+        pad = " " * max(0, 20 - (depth + 1))
         if parent:
             rel_path = os.path.relpath(path, parent)
             dir_structure.append(f"{bar}{pad}{parent_count * '  '}|_{rel_path}")
         else:
             dir_structure.append(f"{bar}{pad}{path}")
-        prior_dirs_info.append(dir_info)
+        seen.append(dir_loc)
 
     # Print tree
     print("\n".join(dir_structure))
 
-def get_dirs_processing_info(dirs_info: list[DirInfo]) -> list[DirProcessingInfo]: # dependency: get_dir_processing_depth() 
+def build_processing_configs(dir_locs: list[DirLoc]) -> list[DirProcessingConfig]: # dependency: prompt_depth() 
+    # Sort by path name
+    dir_locs = sorted(dir_locs, key=lambda dir_loc: dir_loc.path)
     # Depth bar colors
     input_color = Color.GREEN
     covered_color = Color.LIGHT_GREEN
     uncovered_color = Color.GREY
     reset = Color.RESET
     # Containers
-    dirs_processing_info: list[DirProcessingInfo] = []
-    depth_bar = {}
-    # Sort by path name
-    sorted_dirs_info = sorted(dirs_info, key=lambda dir_info: dir_info.path)
+    processing_configs: list[DirProcessingConfig] = []
+    coverage_bar = {}
 
     print(f"\nInput tree")
-    show_dirs_tree(dirs_info, depth_bar=depth_bar)
+    show_directories_tree(dir_locs)
 
     print("\n".join(["\nSelect processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
     interrupt = False
-    for dir_info in sorted_dirs_info:
-        path = dir_info.path
-        lvl = dir_info.level
-        depth = dir_info.depth
-        # Check parents in processed
-        parent = None
-        parent_lvl = -1
-        parent_processing_depth = -1
-        for dir_processing_info in dirs_processing_info:
-            prior_path = dir_processing_info.info.path
-            prior_lvl = dir_processing_info.info.level
-            if is_parent(prior_path, path) and prior_lvl > parent_lvl:
-                parent, parent_lvl, parent_processing_depth = prior_path, prior_lvl, dir_processing_info.processing_depth
+    for dir_loc in dir_locs:
+        path = dir_loc.path
+        lvl = dir_loc.level
+        depth = dir_loc.depth
+        # Check parents in seen
+        parent_config, parent_lvl = None, -1
+        for processing_config in processing_configs:
+            if is_parent(processing_config.loc.path, path) and processing_config.loc.level > parent_lvl:
+                parent_config, parent_lvl = processing_config, processing_config.loc.level
         # Estimate how many layers were covered by parent 
         covered_depth = -1
-        if parent:
-            parent_processing_lvl = parent_lvl + parent_processing_depth
+        if parent_config:
+            parent_processing_lvl = parent_lvl + parent_config.end_depth
             child_max_lvl = lvl + depth
             if parent_processing_lvl >= lvl:
                 if parent_processing_lvl < child_max_lvl:
                     covered_depth = parent_processing_lvl - lvl
                 else:
                     covered = covered_color + "|" * (depth + 1) + reset
-                    depth_bar[path] = covered
+                    coverage_bar[path] = covered
                     continue
         # Generate bar for interrupt case 
         if interrupt:
             covered = covered_color + "|" * covered_depth + reset
             uncovered = uncovered_color + '|' * (depth - covered_depth) + reset
-            depth_bar[path] = covered + uncovered
+            coverage_bar[path] = covered + uncovered
             continue
         # Get user input
         depth_range = [covered_depth + 1, depth]
-        processing_depth, in_action = get_dir_processing_depth(path, depth_range)
-
+        processing_depth, in_action = prompt_depth(path, depth_range)
+        # Generate bar for user input
         covered = covered_color + "|" * (covered_depth + 1) + reset
         if processing_depth >= 0:
             user = input_color + '|' * (processing_depth - covered_depth) + reset
@@ -185,25 +194,25 @@ def get_dirs_processing_info(dirs_info: list[DirInfo]) -> list[DirProcessingInfo
         else:
             user = ''
             uncovered = uncovered_color + '|' * (depth - covered_depth) + reset
-        depth_bar[path] = covered + user + uncovered
+        coverage_bar[path] = covered + user + uncovered
 
         match in_action:
             case MenuActions.SKIP:
                 continue
             case MenuActions.SUCCESS:
-                dirs_processing_info.append(DirProcessingInfo(dir_info, covered_depth, processing_depth))
+                processing_configs.append(DirProcessingConfig(dir_loc, covered_depth + 1, processing_depth))
             case MenuActions.INTERRUPT:
                 interrupt = True
 
-    if not dirs_processing_info:
+    if not processing_configs:
         raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
 
     print(f"\nOutput tree")
-    show_dirs_tree(dirs_info, depth_bar=depth_bar)
+    show_directories_tree(dir_locs, coverage_bar)
     
-    return dirs_processing_info
+    return processing_configs
 
-def get_dir_processing_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: # dependency: get_dirs_processing_info()
+def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: # dependency: build_processing_configs()
 
     range_str = f"{depth_range[0]}-{depth_range[1]}" if depth_range[0] != depth_range[1] else depth_range[0]
 
@@ -236,10 +245,9 @@ def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
                 dirs_to_del[level+1].add(dir_to_del)
     return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
 
-def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cache, metadata: Cache, command: str = None, tagstore: TagStore = None):
+def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cache, metadata: Cache, tagstore: TagStore = None):
 
     op_name = operation.__name__
-    csv_writer = CSVWriter()
 
     # Execute operation
     tqdm.pandas(desc=f"{INDENT}{TQDMDesc.ELEMENTS[op_name].build()}", bar_format=TQDM_BAR) #------- TQDM ------
@@ -296,19 +304,6 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
                 stale_ids = list(src_to_dest.keys())
                 cache.delete(stale_ids)
 
-    # Save summary
-    files_df = files_df.dropna(axis="columns", how="all")
-    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
-    summary_path = os.path.join(OUTPUT_DIR_PATH, f"{command}_{datestamp}.csv")
-
-    print("\nSaved")
-    for result in [register.save(dropna=False), metadata.save(dropna=True), csv_writer.save(files_df, summary_path)]:
-        rel_path = os.path.relpath(result.path, PROJECT_ROOT)
-        if result.success:
-            print(f"{INDENT}{Notifications.ELEMENTS["save_done"].build(path=rel_path)}") #--- Notification ---
-        else:
-            print(f"{INDENT}{Notifications.ELEMENTS["save_failed"].build(path=rel_path, reason=result.error)}") #--- Notification ---
-
     return files_df
 
 def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
@@ -360,7 +355,17 @@ def restore(
     if files_df.empty:
         raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="files")) #--- Error ---
 
-    files_df = execute_operation(files_df, operation, register, metadata, command="restore")
+    files_df = execute_operation(files_df, operation, register, metadata)
+
+    # Save summary
+    files_df = files_df.dropna(axis="columns", how="all")
+    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
+    summary_path = os.path.join(OUTPUT_DIR_PATH, f"restore_{datestamp}.csv")
+    config.csv_writer.save(files_df, summary_path)
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
+    # Save cache
+    register.save(dropna=False)
+    metadata.save(dropna=True)
 
     return files_df
 
@@ -374,7 +379,7 @@ def organise(
         clear_cache: bool = False,
     ) -> pd.DataFrame:
 
-    valid_ops  = (copy, move)
+    valid_ops = (copy, move)
     op_name = operation.__name__
 
     if operation not in valid_ops:
@@ -404,27 +409,21 @@ def organise(
         else:
             cache.load()
 
-    # Load ref
-    ref_df = config.ref.load()
-
     # Load services
     exif = config.exif
     geocoder = config.geocoder
     date_parser = config.parser
 
     # Validate and select source roots
-    roots_info = get_dirs_info(src_roots)
-    roots_processing_info = get_dirs_processing_info(roots_info)
+    root_locs = inspect_directories(src_roots)
+    root_configs = build_processing_configs(root_locs)
 
     # Extract files to process
     file_records = []
-    for root_processing_info in roots_processing_info:
-        path = root_processing_info.info.path
-        covered_depth = root_processing_info.covered_depth
-        processing_depth = root_processing_info.processing_depth
-        for depth, dir, filenames in iter_dir_tree(path, covered_depth + 1, processing_depth):
+    for root_config in root_configs:
+        for depth, dirpath, filenames in iter_dir_tree(root_config.loc.path, root_config.start_depth, root_config.target_depth):
             for filename in filenames:
-                file_records.append((path, processing_depth, dir, depth, filename))
+                file_records.append((root_config.loc.path, root_config.target_depth, dirpath, depth, filename))
 
     # Pre-processing
     files_df = pd.DataFrame(file_records, columns=[Cols.ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
@@ -442,7 +441,7 @@ def organise(
     files_df = add_file_id(prefix="", tagstore=tagstore).run(files_df)
     reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
-    # Check if there is enough space to procesfiles
+    # Check if there is enough space to process files
     required = files_df[Cols.SIZE].sum()
     _, _, free = shutil.disk_usage(dest_root)
     if required >= free:
@@ -498,7 +497,7 @@ def organise(
     files_df = consolidate_file_ext(tagstore=tagstore).run(files_df)
 
     # Get categories from ref
-    files_df = files_df.merge(ref_df[[Cols.FILE_EXT, Cols.FILE_CATEGORY]], how="left", left_on=Cols.CONSOLIDATED_EXT, right_on=Cols.FILE_EXT)
+    files_df = files_df.merge(config.ref[[Cols.FILE_EXT, Cols.FILE_CATEGORY]], how="left", left_on=Cols.CONSOLIDATED_EXT, right_on=Cols.FILE_EXT)
     files_df[Cols.FILE_CATEGORY] = files_df[Cols.FILE_CATEGORY].fillna("Other")
 
     # Filter file category
@@ -535,38 +534,47 @@ def organise(
     files_df = assemble_file_path(prefix="Dest", tagstore=tagstore).run(files_df)
 
     # Execute operation
-    files_df = execute_operation(files_df, operation, register, metadata, command="organise")
+    files_df = execute_operation(files_df, operation, register, metadata)
+
+    # Save summary
+    files_df = files_df.dropna(axis="columns", how="all")
+    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
+    summary_path = os.path.join(OUTPUT_DIR_PATH, f"organise_{datestamp}.csv")
+    config.csv_writer.save(files_df, summary_path)
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
+    # Save cache
+    register.save(dropna=False)
+    metadata.save(dropna=True)
 
     return files_df
 
 def main(command: str = "organise"):
 
-    csv_loader = CSVLoader(encoding="cp852")
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)
 
     config = Config(
         register=Cache(path=REGISTER_PATH, writer=json_writer, loader=json_loader),
         metadata=Cache(path=METADATA_PATH, writer=json_writer, loader=json_loader),
-        ref=Reference(path=EXTENSION_MAP_PATH, loader=csv_loader),
-        exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCOODING, batch_size=EXIFTOOL_BATCH_SIZE),
+        ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"),
+        exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
+        csv_writer=CSVWriter(encoding="utf-8-sig"),
         geocoder=RGeocoder(mode=1, verbose=False),
         parser=DateParser(),
     )
 
-    category_selection = CategorySelection(categories=get_args(Category)).get()
+    category_selection = CategorySelection().get()
 
     if command == "organise":
        organise(
-            # src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
-            # src_roots=["D:\\MyOrganizedFiles1"],
-            src_roots = ["D:\\OneDrive"],
+            src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
+            # src_roots = ["D:\\OneDrive"],
             dest_root="D:\\MyOrganizedFiles",
             operation=copy,
             config=config,
             file_categories=category_selection,
             dir_schema=DIR_SCHEMA,
-            clear_cache=True,
+            clear_cache=False,
         )
 
     elif command == "restore":
