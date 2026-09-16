@@ -73,13 +73,11 @@ class Config:
 
 @dataclass
 class DirLoc:
-    path: str
     level: int # position on the global ruler (levels from drive)
     depth: int # subtree depth below dir (dir itself = 0)
 
 @dataclass
 class DirProcessingConfig:
-    loc: DirLoc
     start_depth: int #  next layer following the layers covered by a parent (dir = 0)
     target_depth: int # level to which the dir is traversed (0 = dir only)
 
@@ -94,39 +92,40 @@ class MenuActions(StrEnum):
 ###############################
 ########### HELPERS ###########
 ###############################
-def inspect_directories(dir_paths: list[str]) -> list[DirLoc]:
+def inspect_directories(dir_paths: list[str]) -> dict[str, DirLoc]:
     unique_dir_paths = set(os.path.normpath(dir_path) for dir_path in dir_paths)
-    dir_locs = []
+    dir_loc_map: dict[str, DirLoc] = {}
     for dir_path in unique_dir_paths:
         if not is_dir(dir_path) or is_empty(dir_path):
             continue
-        dir_locs.append(DirLoc(dir_path, depth_from_drive(dir_path), tree_depth(dir_path)))
-    return dir_locs
+        dir_loc_map[dir_path] = DirLoc(
+            level=depth_from_drive(dir_path),
+            depth = tree_depth(dir_path)
+        )
+    return dir_loc_map
 
-def show_directories_tree(dir_locs: list[DirLoc], coverage_bar: dict[str, str] = None) -> None:
+def show_directories_tree(dir_loc_map: dict[str, DirLoc], coverage_bar: dict[str, str] = None) -> None:
     # Sort by path name
-    dir_locs = sorted(dir_locs, key=lambda dir_loc: dir_loc.path)
+    dir_loc_map = dict(sorted(dir_loc_map.items(), key=lambda item: item[0]))
     # Handle depth bar
     coverage_bar = coverage_bar or {}
     # Containers
-    dir_structure = []
-    seen: list[DirLoc] = []
+    dir_structure: list[str] = []
+    seen_paths: list[str] = []
 
     # Execution
-    for dir_loc in dir_locs:
-        path = dir_loc.path
-        depth = dir_loc.depth
+    for path, dir_loc in dir_loc_map.items():
         # Check parents in seen
         parent = None
         parent_lvl = -1
         parent_count = 0
-        for seen_loc in seen:
-            seen_path = seen_loc.path
-            seen_lvl = seen_loc.level
+        for seen_path in seen_paths:
+            seen_lvl = dir_loc_map[seen_path].level
             if is_parent(seen_path, path):
                 parent_count += 1
                 if seen_lvl > parent_lvl:
                     parent, parent_lvl = seen_path, seen_lvl
+        depth = dir_loc.depth
         bar = coverage_bar.get(path, (depth + 1) * "|")
         pad = " " * max(0, 20 - (depth + 1))
         if parent:
@@ -134,45 +133,45 @@ def show_directories_tree(dir_locs: list[DirLoc], coverage_bar: dict[str, str] =
             dir_structure.append(f"{bar}{pad}{parent_count * '  '}|_{rel_path}")
         else:
             dir_structure.append(f"{bar}{pad}{path}")
-        seen.append(dir_loc)
+        seen_paths.append(path)
 
     # Print tree
     print("\n".join(dir_structure))
 
-def build_processing_configs(dir_locs: list[DirLoc]) -> list[DirProcessingConfig]: # dependency: prompt_depth() 
+def build_processing_configs(dir_loc_map: dict[str, DirLoc]) -> dict[str, DirProcessingConfig]: # dependency: prompt_depth() 
     # Sort by path name
-    dir_locs = sorted(dir_locs, key=lambda dir_loc: dir_loc.path)
+    dir_loc_map = dict(sorted(dir_loc_map.items(), key=lambda item: item[0]))
     # Depth bar colors
     input_color = Color.GREEN
     covered_color = Color.LIGHT_GREEN
     uncovered_color = Color.GREY
     reset = Color.RESET
     # Containers
-    processing_configs: list[DirProcessingConfig] = []
-    coverage_bar = {}
+    dir_config_map: dict[str, DirProcessingConfig] = {}
+    coverage_bar: dict[str, str] = {}
 
     print(f"\nInput tree")
-    show_directories_tree(dir_locs)
+    show_directories_tree(dir_loc_map)
 
     print("\n".join(["\nSelect processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
     interrupt = False
-    for dir_loc in dir_locs:
-        path = dir_loc.path
+    for path, dir_loc in dir_loc_map.items():
         lvl = dir_loc.level
         depth = dir_loc.depth
-        # Check parents in seen
-        parent_config, parent_lvl = None, -1
-        for processing_config in processing_configs:
-            if is_parent(processing_config.loc.path, path) and processing_config.loc.level > parent_lvl:
-                parent_config, parent_lvl = processing_config, processing_config.loc.level
+        # Find deepest processed ancestor.
+        parent_lvl, parent_target_depth = -1, -1
+        for processed_path, dir_config in dir_config_map.items():
+            processed_path_lvl = dir_loc_map[processed_path].level
+            if is_parent(processed_path, path) and processed_path_lvl > parent_lvl:
+                parent_lvl, parent_target_depth = processed_path_lvl, dir_config.target_depth
         # Estimate how many layers were covered by parent 
         covered_depth = -1
-        if parent_config:
-            parent_processing_lvl = parent_lvl + parent_config.end_depth
+        if parent_lvl >= 0:
+            parent_target_lvl = parent_lvl + parent_target_depth
             child_max_lvl = lvl + depth
-            if parent_processing_lvl >= lvl:
-                if parent_processing_lvl < child_max_lvl:
-                    covered_depth = parent_processing_lvl - lvl
+            if parent_target_lvl >= lvl:
+                if parent_target_lvl < child_max_lvl:
+                    covered_depth = parent_target_lvl - lvl
                 else:
                     covered = covered_color + "|" * (depth + 1) + reset
                     coverage_bar[path] = covered
@@ -185,12 +184,12 @@ def build_processing_configs(dir_locs: list[DirLoc]) -> list[DirProcessingConfig
             continue
         # Get user input
         depth_range = [covered_depth + 1, depth]
-        processing_depth, in_action = prompt_depth(path, depth_range)
+        target_depth, in_action = prompt_depth(path, depth_range)
         # Generate bar for user input
         covered = covered_color + "|" * (covered_depth + 1) + reset
-        if processing_depth >= 0:
-            user = input_color + '|' * (processing_depth - covered_depth) + reset
-            uncovered = uncovered_color + '|' * (depth - processing_depth) + reset
+        if target_depth >= 0:
+            user = input_color + '|' * (target_depth - covered_depth) + reset
+            uncovered = uncovered_color + '|' * (depth - target_depth) + reset
         else:
             user = ''
             uncovered = uncovered_color + '|' * (depth - covered_depth) + reset
@@ -200,17 +199,20 @@ def build_processing_configs(dir_locs: list[DirLoc]) -> list[DirProcessingConfig
             case MenuActions.SKIP:
                 continue
             case MenuActions.SUCCESS:
-                processing_configs.append(DirProcessingConfig(dir_loc, covered_depth + 1, processing_depth))
+                dir_config_map[path] = DirProcessingConfig(
+                    start_depth=covered_depth + 1,
+                    target_depth=target_depth
+                )
             case MenuActions.INTERRUPT:
                 interrupt = True
 
-    if not processing_configs:
+    if not dir_config_map:
         raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
 
     print(f"\nOutput tree")
-    show_directories_tree(dir_locs, coverage_bar)
+    show_directories_tree(dir_loc_map, coverage_bar)
     
-    return processing_configs
+    return dir_config_map
 
 def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: # dependency: build_processing_configs()
 
@@ -295,7 +297,7 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
     # Update cache
     for cache in (register, metadata):
         if not no_chg_id.empty:
-            cache.update(no_chg_id) # ensure dtype alignment
+            cache.update(no_chg_id.convert_dtypes()) # ensure dtype alignment
         if not chg_id.empty:
             cache.clone(src_to_dest)
             cache.update(chg_id.convert_dtypes()) # ensure dtype alignment
@@ -420,10 +422,10 @@ def organise(
 
     # Extract files to process
     file_records = []
-    for root_config in root_configs:
-        for depth, dirpath, filenames in iter_dir_tree(root_config.loc.path, root_config.start_depth, root_config.target_depth):
+    for path, root_config in root_configs.items():
+        for depth, dirpath, filenames in iter_dir_tree(path, root_config.start_depth, root_config.target_depth):
             for filename in filenames:
-                file_records.append((root_config.loc.path, root_config.target_depth, dirpath, depth, filename))
+                file_records.append((path, root_config.target_depth, dirpath, depth, filename))
 
     # Pre-processing
     files_df = pd.DataFrame(file_records, columns=[Cols.ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
@@ -479,8 +481,8 @@ def organise(
 
     # Update cache
     if not changed_files_df.empty:
-        register.update(changed_files_df[reg_cols])
-        metadata.update(exif_df.loc[exif_df.index.isin(changed_files_df.index)])
+        register.update(changed_files_df[reg_cols].convert_dtypes()) # ensure dtype alignment
+        metadata.update(exif_df.loc[exif_df.index.isin(changed_files_df.index)].convert_dtypes()) # ensure dtype alignment
 
     if not new_files_df.empty:
         register.add(new_files_df[reg_cols])
