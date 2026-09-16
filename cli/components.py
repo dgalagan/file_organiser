@@ -23,8 +23,9 @@ class Template():
                 self.construct.remove(item)
         self.construct.append(("".join(to_collapse), num, align))
         return self
+
     # String items assembly
-    def build(self, **kwargs):
+    def build(self, indent: int = 0, **kwargs):
         result = ""
         for item in self.construct:
             if isinstance(item, tuple):
@@ -32,7 +33,7 @@ class Template():
                 result += f"{part.format(**kwargs):{align}{pad}}"
             else:
                 result += item
-        return result.format(**kwargs)
+        return f"{indent * '  '}{result.format(**kwargs)}"
 
 @dataclass
 class Component():
@@ -46,50 +47,49 @@ class Component():
 @dataclass
 class Prompt(Component):
 
-    START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = Icon.GREATERTHAN
+    ICON:  ClassVar[str] = f"{Color.CYAN}{Icon.GREATERTHAN}{Color.RESET}" #{5chars}{3chars}{4chars}
     SEPARATOR: ClassVar[str] = Separator.SPACE
+    ANSI_LEN: ClassVar[int] = len(Color.CYAN + Color.RESET)
 
     Options = Literal["depth_input"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "depth_input": (
         Template()
-        .message(f"{Color.CYAN}{EMOJI} {{num}}{Color.RESET}")
-        .padding(18)
-        .message("{dir_path}")
+        .token(ICON)
+        .message(" {num:^5} {dir_path}")
         )
     }
 
 @dataclass
 class Errors(Component):
 
-    START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = Emoji.CROSSMARK
-    SEPARATOR: ClassVar[str] = Separator.SPACE 
+    ICON:  ClassVar[str] = f"{Color.RED}{Icon.CROSSMARK}{Color.RESET}" #{5chars}{3chars}{4chars}
+    SEPARATOR: ClassVar[str] = Separator.SPACE
+    ANSI_LEN: ClassVar[int] = len(Color.RED + Color.RESET)
 
-    Options = Literal["empty_input", "exception", "unknown_value", "low_disk_space"]
+    Options = Literal["empty", "exception", "unknown_value", "low_disk_space"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "empty_input":(
+        "empty":(
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
-            .message("No {subject} available")
+            .message("{subject}: not found")
         ),
         "exception":(
              Template()
-             .token(EMOJI)
+             .token(ICON)
              .token(SEPARATOR)
-             .message("Error while {op}: {e:.30}")
+             .message("Failed {path}: [{errno}]")
         ),
         "unknown_value":(
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Unknown value: {received}. Expected: {expected}")
         ),
         "low_disk_space":(
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Not enough space to {op} files: need {required} GB, {free} GB free")
         )
@@ -98,45 +98,41 @@ class Errors(Component):
 @dataclass
 class Warnings(Component):
 
-    START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = Emoji.WARNINGSIGN
+    ICON:  ClassVar[str] = f"{Color.YELLOW}{Icon.WARNING}{Color.RESET}"
     SEPARATOR: ClassVar[str] = Separator.SPACE
+    ANSI_LEN: ClassVar[int] = len(Color.YELLOW + Color.RESET)
 
-    Options = Literal["invalid_input", "not_found"]
+    Options = Literal["base", "invalid_input"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
+        "base": (
+            Template()
+            .token(ICON)
+            .token(SEPARATOR)
+        ),
         "invalid_input": (
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Invalid input")
         ),
-        "not_found": (
-            Template()
-            .token(EMOJI)
-            .token(SEPARATOR)
-            .message("Columns not found")
-            .padding(31)
-            .message("- {cols}")
-        )
     }
 
 @dataclass
 class Notifications(Component):
-    
-    START: ClassVar[str] = ""
-    EMOJI:  ClassVar[str] = ""
+
+    ICON:  ClassVar[str] = Icon.INFORMATION
     SEPARATOR: ClassVar[str] = Separator.SPACE
     
     Options = Literal["root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "root_stat": (
             Template()
-            .token(Icon.INFORMATION)
-            .message("{n:^17,}{dir_path}")
+            .token(ICON)
+            .message("{n:^15,}{dir_path}")
         ),
         "cache_load": (
             Template()
-            .token(Icon.INFORMATION)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Metadata from cache")
             .padding(30)
@@ -144,7 +140,7 @@ class Notifications(Component):
         ),
         "filtered": (
             Template()
-            .token(Icon.INFORMATION)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Filtered")
             .padding(30)
@@ -168,8 +164,6 @@ class Notifications(Component):
         ),
         "save_done": (
             Template()
-            # .token(f"{Color.GREEN}{Icon.CHECKMARK}{Color.RESET}")
-            # .padding(20)
             .message("Summary saved -> {path}")
         ),
     }
@@ -177,35 +171,35 @@ class Notifications(Component):
 @dataclass
 class TQDMDesc(Component):
     
-    EMOJI:  ClassVar[str] = Icon.GREATERTHAN
+    ICON:  ClassVar[str] = Icon.GREATERTHAN
     SEPARATOR: ClassVar[str] = Separator.SPACE
 
     Options = Literal["extract", "copy", "move", "remove"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "extract": (
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Extract files metadata")
             .padding(30)
         ),
         "copy": (
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Copy files")
             .padding(30)
         ),
         "move": (
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Move files")
             .padding(30)
         ),
         "remove": (
             Template()
-            .token(EMOJI)
+            .token(ICON)
             .token(SEPARATOR)
             .message("Remove dirs")
             .padding(30)

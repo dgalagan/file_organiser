@@ -53,11 +53,13 @@ class Icon(Token):
     CROSSMARK =          "[✗]"
     GREATERTHAN =        "[>]"
     INFORMATION =        "[i]"
+    WARNING =            "[!]"
 
 class Color:
     GREEN = "\033[1;38;5;34m"
     LIGHT_GREEN = "\033[1;38;5;157m"
     RED = "\033[31m"
+    YELLOW = "\033[33m"
     CYAN = "\033[36m"
     GREY  = "\033[90m"
     RESET = "\033[0m"

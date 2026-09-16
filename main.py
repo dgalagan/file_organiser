@@ -37,6 +37,7 @@ from collections import defaultdict
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
 # [df] ensure coherence of dtypes between different steps in df processing
+# [df] check read csv encoding cp852 for ref table read
 # [categories] validate literal list against ref table
 
 EXIFTOOL_PATH = "D:/Development/Software/Projects/file_organiser/bin/exif/exiftool(-k).exe"
@@ -54,12 +55,11 @@ META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
     Tags.MODIFY_DT: KeywordFilter(["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]),
 }
 DIR_SCHEMA = {
-    "Universal": [("FileHashDupLabel", True), ("FileCategory", True), ("EarliestYear", True)],
+    "Universal": [("FileHashDupLabel", False), ("FileCategory", True), ("EarliestYear", True)],
     "Image": [("ImageCountry", True), ("EXIF:Model", True)],
     "Data-Excel": [("WorksheetsCount", True)]
 }
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
-INDENT = "  "
 
 @dataclass
 class Config:
@@ -153,7 +153,7 @@ def build_processing_configs(dir_loc_map: dict[str, DirLoc]) -> dict[str, DirPro
     print(f"\nInput tree")
     show_directories_tree(dir_loc_map)
 
-    print("\n".join(["\nSelect processing depth", f"{INDENT}[blank]  Skip", f"{INDENT}[Ctrl+C] Abort\n"]))
+    print("\n".join(["\nSelect processing depth", f"  [blank]  skip", f"  [Ctrl+C] abort\n"]))
     interrupt = False
     for path, dir_loc in dir_loc_map.items():
         lvl = dir_loc.level
@@ -207,7 +207,7 @@ def build_processing_configs(dir_loc_map: dict[str, DirLoc]) -> dict[str, DirPro
                 interrupt = True
 
     if not dir_config_map:
-        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="src roots")) #--- Error ---
+        raise ValueError(Errors.ELEMENTS["empty"].build(subject="src roots")) #--- Error ---
 
     print(f"\nOutput tree")
     show_directories_tree(dir_loc_map, coverage_bar)
@@ -220,17 +220,18 @@ def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: 
 
     while True:
         try:
-            print(f"{INDENT}{Prompt.ELEMENTS["depth_input"].build(dir_path=dir_path, num=range_str)}")
-            processing_depth = input(f"{INDENT*5} \\__depth: ")
+            prompt_message = Prompt.ELEMENTS["depth_input"].build(indent=1, dir_path=dir_path, num=range_str)
+            offset = len(prompt_message) - len(dir_path) - Prompt.ANSI_LEN
+            processing_depth = input(f"{prompt_message}\n{" "*offset}\\__depth: ")
             if processing_depth == "":
                 return -1, MenuActions.SKIP
             processing_depth = int(processing_depth)
             if depth_range[0] <= processing_depth <= depth_range[1]:
                 return processing_depth, MenuActions.SUCCESS
-            print(Warnings.ELEMENTS["invalid_input"].build())
+            print(f"{" "*offset}{Warnings.ELEMENTS["invalid_input"].build()}")
             continue
         except ValueError:
-            print(Warnings.ELEMENTS["invalid_input"].build())
+            print(f"{" "*offset}{Warnings.ELEMENTS["invalid_input"].build()}")
             continue
         except KeyboardInterrupt:
             print()
@@ -240,7 +241,7 @@ def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
     dirs_to_del = defaultdict(set)
     for row_id, row in dirs_df.iterrows():
         relpath = os.path.relpath(row[Cols.FILE_DIR_PATH], row[Cols.ROOT])
-        if relpath != '.': 
+        if relpath != '.':
             dir_parts = relpath.split(os.sep)
             for level in range(len(dir_parts)):
                 dir_to_del = os.path.join(row[Cols.ROOT], os.sep.join(dir_parts[:level+1]))
@@ -252,28 +253,28 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
     op_name = operation.__name__
 
     # Execute operation
-    tqdm.pandas(desc=f"{INDENT}{TQDMDesc.ELEMENTS[op_name].build()}", bar_format=TQDM_BAR) #------- TQDM ------
+    tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
     files_df[op_name] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[Cols.dest(Cols.FILE_PATH)]), axis=1)
     files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"], tagstore=tagstore).run(files_df)
     files_df = add_file_id(prefix="Dest", tagstore=tagstore).run(files_df)
 
-    # Remove emptied dirs
-    if operation is move:
-        dirs_df = files_df[[Cols.ROOT, Cols.FILE_DIR_PATH]].drop_duplicates()
-        dirs_to_del = collect_dirs_to_delete(dirs_df)
-        for dir_to_del in tqdm(dirs_to_del, desc=f"{INDENT}{TQDMDesc.ELEMENTS["remove"].build()}", bar_format=TQDM_BAR): #--- TQDM ---
-            try:
-                os.rmdir(dir_to_del)
-            except OSError as e:
-                tqdm.write(Errors.ELEMENTS["exception"].build(op="Remove dir", e=str(e))) #--- Error ---
-
     n_total = len(files_df)
     n_succeeded = len(files_df[op_name].loc[files_df[op_name].isna()])
     n_failed = len(files_df[op_name].loc[files_df[op_name].notna()])
+    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=n_succeeded, n_total=n_total, share=n_succeeded/n_total)) #--- Notification ---
+    print(Notifications.ELEMENTS["op_failed"].build(indent=3, n=n_failed, n_total=n_total, share=n_failed/n_total)) #--- Notification ---
 
-    print(f"{INDENT}{INDENT}{INDENT}{Notifications.ELEMENTS["op_done"].build(n=n_succeeded, n_total=n_total, share=n_succeeded/n_total)}") #--- Notification ---
-    print(f"{INDENT}{INDENT}{INDENT}{Notifications.ELEMENTS["op_failed"].build(n=n_failed, n_total=n_total, share=n_failed/n_total)}") #--- Notification ---
-    
+    # Remove emptied dirs
+    errors = []
+    if operation is move:
+        dirs_df = files_df[[Cols.ROOT, Cols.FILE_DIR_PATH]].drop_duplicates()
+        dirs_to_del = collect_dirs_to_delete(dirs_df)
+        for dir_to_del in tqdm(dirs_to_del, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR): #--- TQDM ---
+            try:
+                os.rmdir(dir_to_del)
+            except OSError as e:
+                errors.append(Errors.ELEMENTS["exception"].build(indent=3, path=dirs_to_del, errno=e.errno)) #--- Error ---
+    print("\n".join(errors))
     # Post operation cache sync
     # Identify successfully completed operation cases
     completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.INODE_DEV), Cols.dest(Cols.INODE)]]
@@ -324,11 +325,10 @@ def restore(
         config: Config
     ) -> pd.DataFrame:
 
-    valid_ops  = (copy, move)
     op_name = operation.__name__
 
-    if operation not in valid_ops:
-        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in valid_ops]))
+    if operation not in (copy, move):
+        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in (copy, move)]))
 
     if operation is move:
         print("MOVE operation selected — original files at the source will be permanently deleted after being moved to the destination")
@@ -355,7 +355,7 @@ def restore(
     })
 
     if files_df.empty:
-        raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="files")) #--- Error ---
+        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     files_df = execute_operation(files_df, operation, register, metadata)
 
@@ -381,16 +381,17 @@ def organise(
         clear_cache: bool = False,
     ) -> pd.DataFrame:
 
-    valid_ops = (copy, move)
     op_name = operation.__name__
 
-    if operation not in valid_ops:
-        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in valid_ops])) #--- Error ---
+    if operation not in (copy, move):
+        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in (copy, move)])) #--- Error ---
+
+    print(f"{op_name.upper()} FILES")
 
     if operation is move:
-        # no space consequences
-        print("MOVE operation selected — original files at the source will be permanently deleted after being moved to the destination")
-        response = input("Proceed? [y/N]: ").strip().lower()
+        base = Warnings.ELEMENTS["base"].build()
+        offset = len(base) - Warnings.ANSI_LEN
+        response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
         if response == "n":
             return pd.DataFrame()
 
@@ -427,13 +428,16 @@ def organise(
             for filename in filenames:
                 file_records.append((path, root_config.target_depth, dirpath, depth, filename))
 
+    if not file_records:
+        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
+
     # Pre-processing
     files_df = pd.DataFrame(file_records, columns=[Cols.ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
 
     #--- Notification ---
     print("\nFiles found")
     for root in files_df[Cols.ROOT].unique():
-        print(f"{INDENT}{Notifications.ELEMENTS["root_stat"].build(dir_path=root, n=len(files_df.loc[files_df[Cols.ROOT] == root]))}")
+        print(Notifications.ELEMENTS["root_stat"].build(indent=1, dir_path=root, n=len(files_df.loc[files_df[Cols.ROOT] == root])))
     #--- Notification ---
 
     files_df[Cols.EXIF_ARGS] = "".join(EXIFTOOL_ARGS)
@@ -444,12 +448,13 @@ def organise(
     reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
     # Check if there is enough space to process files
-    required = files_df[Cols.SIZE].sum()
-    _, _, free = shutil.disk_usage(dest_root)
-    if required >= free:
-        required_gb = bytes_converter(required, "GB")
-        free_gb = bytes_converter(free, "GB")
-        raise RuntimeError(Errors.ELEMENTS["low_disk_space"].build(op=op_name, required=required_gb, free=free_gb)) #--- Error ---
+    if operation is copy:
+        required = files_df[Cols.SIZE].sum()
+        _, _, free = shutil.disk_usage(dest_root)
+        if required >= free:
+            required_gb = bytes_converter(required, "GB")
+            free_gb = bytes_converter(free, "GB")
+            raise RuntimeError(Errors.ELEMENTS["low_disk_space"].build(op=op_name, required=required_gb, free=free_gb)) #--- Error ---
 
     new_files_df = files_df[~files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
     known_files_df = files_df[files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
@@ -465,14 +470,14 @@ def organise(
     print("\nFiles processing")
     n_total = len(files_df)
     n_loaded = len(known_files_df) - len(changed_files_df)
-    print(f"{INDENT}{Notifications.ELEMENTS["cache_load"].build(n=n_loaded, n_total=n_total, share=n_loaded/n_total)}") #--- Notification ---
+    print(Notifications.ELEMENTS["cache_load"].build(indent=1, n=n_loaded, n_total=n_total, share=n_loaded/n_total))#--- Notification ---
 
     # Extract exif metadata
     to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[Cols.FILE_PATH, Cols.FILE_ID, Cols.INODE_DEV, Cols.INODE]]
     if not to_exif_df.empty:
         files_to_exif = to_exif_df[Cols.FILE_PATH].to_list()
         n_files = len(files_to_exif)
-        exif_results = list(tqdm(exif.extract(files_to_exif, args=EXIFTOOL_ARGS), total=n_files, desc=f"{INDENT}{TQDMDesc.ELEMENTS["extract"].build()}", bar_format=TQDM_BAR)) #------- TQDM ------
+        exif_results = list(tqdm(exif.extract(files_to_exif, args=EXIFTOOL_ARGS), total=n_files, desc=TQDMDesc.ELEMENTS["extract"].build(indent=1), bar_format=TQDM_BAR)) #------- TQDM ------
         exif_df = pd.DataFrame(exif_results)
         exif_df["SourceFile"] = exif_df["SourceFile"].apply(os.path.normpath)
         exif_df = exif_df.merge(to_exif_df, how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
@@ -505,10 +510,11 @@ def organise(
     # Filter file category
     if file_categories:
         files_df = FilterRows(Condition(Cols.FILE_CATEGORY, "isin", file_categories)).run(files_df)
-        if files_df.empty:
-            raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="files")) #--- Error ---
         n_filtered = n_total - len(files_df)
-        print(f"{INDENT}{Notifications.ELEMENTS["filtered"].build(n=n_filtered, n_total=n_total, share=n_filtered/n_total)}") #--- Notification ---
+        print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=n_filtered/n_total)) #--- Notification ---
+
+    if files_df.empty:
+        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     # Resolve dest dir schema
     if dir_schema:
@@ -558,7 +564,7 @@ def main(command: str = "organise"):
     config = Config(
         register=Cache(path=REGISTER_PATH, writer=json_writer, loader=json_loader),
         metadata=Cache(path=METADATA_PATH, writer=json_writer, loader=json_loader),
-        ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"),
+        ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"), #
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
         csv_writer=CSVWriter(encoding="utf-8-sig"),
         geocoder=RGeocoder(mode=1, verbose=False),
@@ -569,10 +575,10 @@ def main(command: str = "organise"):
 
     if command == "organise":
        organise(
-            src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
-            # src_roots = ["D:\\OneDrive"],
+            # src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
+            src_roots = ["D:\\MyOrganizedFiles"],
             dest_root="D:\\MyOrganizedFiles",
-            operation=copy,
+            operation=move,
             config=config,
             file_categories=category_selection,
             dir_schema=DIR_SCHEMA,
@@ -581,7 +587,7 @@ def main(command: str = "organise"):
 
     elif command == "restore":
         restore(
-            report_name="organise_20260831T182240.csv",
+            report_name="organise_20260916T145535.csv",
             operation=move,
             config=config
         )

@@ -1,139 +1,139 @@
 FileExt,Software,Description,FileCategory
-7z,7-Zip,7-Zip Compressed Archive,Archive
-a6r,Quiz Interactive App,Authorware Runtime,Application
-ac3,"VLC, Windows Media Player",Audio Codec 3,Audio
-act,Games,Other,Application
-avi,"VLC, Windows Media Player, Media Player Classic",Audio Video Interleave,Video
-axd,Other,ASP.NET Web Handler files,Other
-bib,"LaTeX editors (TeXstudio, Overleaf), JabRef",BibTeX bibliography file,Documents-BIB
-bin,Various,Binary File,Application
-bmp,"Paint, Photoshop, Windows Photos, Preview",Bitmap Image File,Image
-boot,Linux,Boot Configuration,Application
-c32,Linux,Linux System File,Application
-cached,Games,Cache File,Application
-cat,Windows,Security Catalog File,Application
-cfg,Any Text Editor,Configuration File,Config
-code-workspace,VS Code,Other,Config
-com,Windows,Executable Command,Application
-conf,Any Text Editor,Configuration File,Config
-cpk,Games,CRI Middleware Package File,Application
-crc,Other,Other,Other
-cs,VS Code,C# Source File,Script
-css,Any Text Editor,Cascading Style Sheet,Web
-csv,Microsoft Excel,Comma-Separated Values,Data-Excel
-dat,Games,Data File,Application
-db,SQLite,Database File,Database
-desktop,Linux,Linux Shortcut / Launcher,Application
-djvu,"DjVu Viewer, SumatraPDF",DjVu files,Ebook
-dll,Windows,Dynamic Link Library,Application
-doc,Microsoft Word,Microsoft Word 97–2003 Document,Documents-Word
-docx,Microsoft Word,Microsoft Word Open XML Document,Documents-Word
-dotm,Microsoft Word,Microsoft Word Macro-Enabled Template,Documents-Word
-download,Other,Other,Other
-eml,Microsoft Outlook,Email Message File,Email
-epub,"Calibre, Adobe Digital Editions",Electronic Publication,Ebook
-etl,OS Inspection,Event Trace Log,Application
-exe,Windows,Executable Command,Application
-flac,"VLC, Windows Media Player",Free Lossless Audio Codec,Audio
-flv,"VLC, Adobe Flash Player",Flash Video,Video
-fps,Microsoft Outlook,Personal Storage Table (Outlook Data File),Email
-fpx,Microsoft Outlook,Personal Storage Table (Outlook Data File),Email
-gif,"Paint, Photoshop, Windows Photos, Preview",Graphics Interchange Format,Image
-gz,"WinRAR, 7-Zip, Gzip",Gzip Compressed Archive,Archive
-heic,"Paint, Photoshop, Windows Photos, Preview",High Efficiency Image Container,Image
-htm,Web Browsers,HyperText Markup,Web
-html,Web Browsers,HyperText Markup Language,Web
-idx,Git,Pack index file,Application
-iif,Intuit QuickBooks,Intuit Interchange Format,Data-Other
-inf,Windows,Setup Information File,Application
-ini,Windows,Initialization File,Application
-ipynb,VS Code,IPython Notebook,Script
-jpeg,"Paint, Photoshop, Windows Photos, Preview",Joint Photographic Experts Group,Image
-jpg,"Paint, Photoshop, Windows Photos, Preview",Joint Photographic Experts Group,Image
-js,VS Code,JavaScript Source File,Script
-json,VS Code,JavaScript Object Notation,Data-Other
-jupyterlab-settings,Jupyter,Jupyter Lab Settings File,Config
-jupyterlab-workspace,Jupyter,Jupyter Lab Workspace File,Config
-lng,Exam Interactive App,Language Resource File,Application
-lnk,Windows,Windows Shortcut,Application
-loaded_0,Other,Other,Other
-log,Other,Log File,Other
-m,MATLAB,MATLAB Source File,Script
-m3u,Other,MP3 link,Web
-m4a,"VLC, Windows Media Player",MPEG-4 Audio,Audio
-mat,MATLAB,MATLAB Data File,Data-Other
-md,Any Text Editor,Markdown file,Documents-Text
-mdb,Microsoft Access,Microsoft Access Database File,Database
-mkv,"VLC, Windows Media Player",Matroska Video,Video
-mo3,Games,Compressed module music format,Application
-mov,"VLC, QuickTime Player",QuickTime Movie,Video
-mp3,"VLC, Windows Media Player",MPEG-1 Audio Layer III,Audio
-mp4,"VLC, Windows Media Player",MPEG-4 Part 14,Video
-mpeg,"VLC, Windows Media Player",Moving Picture Experts Group,Video
-mpg,"VLC, Windows Media Player",MPEG Video File,Video
-mrimgx,Macrium Reflect,Disk Image,SystemBackup
-msg,Microsoft Outlook,Microsoft Outlook Email Message,Email
-msi,Windows,Microsoft Installer,Application
-nfo,Windows,System Information File,Application
-npy,Python (NumPy),NumPy Array File,Data-Other
-nsmp7,Other,Other,Other
-ogg,"VLC, Windows Media Player",Ogg Vorbis Audio File,Audio
-orf,"Olympus Viewer, Photoshop, Windows Photos",Olympus Raw Format,Image
-other,,,Other
-pack,Git,Packfile,Application
-parquet,"Apache Spark, Pandas, PyArrow, AWS Athena",Apache Parquet File,Data-Other
-pbix,Microsoft Power BI,Power BI Desktop File,Data-PowerBI
-pckl,VS Code,Python Pickle file,Data-Other
-pdf,"Adobe Acrobat, Foxit Reader, Preview, Web Browsers",Portable Document Format,Documents-PDF
-pkl,VS Code,Python Pickle File,Data-Other
-png,"Paint, Photoshop, Windows Photos, Preview",Portable Network Graphics,Image
-potx,Microsoft Power Point,PowerPoint Macro-Enabled Template,Data-PowerPoint
-ppt,Microsoft Power Point,Microsoft PowerPoint 97–2003 Presentation,Data-PowerPoint
-pptm,Microsoft Power Point,PowerPoint Macro-Enabled Presentation,Data-PowerPoint
-pptx,Microsoft Power Point,Microsoft PowerPoint Open XML Presentation,Data-PowerPoint
-ps1,Windows,Windows PowerShell,Script
-pst,Microsoft Outlook,Personal Storage Table (Outlook Data File),Email
-pth,Python (PyTorch),PyTorch Model File,Data-Other
-py,VS Code,Python Source File,Script
-pyc,Python Interpreter,Python Compiled File,Cache
-qst,Quiz Interactive App,Other,Application
-qsz,Quiz Interactive App,Other,Application
-rar,"WinRAR, 7-Zip",Roshal Archive,Archive
-rdp,Windows,Microsoft Remote Desktop,Application
-reg,Windows,Windows Registry File,Application
-registry,Windows,Windows Registry,Application
-rev,Git,Reverse index file,Application
-rtf,"Microsoft Word, WordPad, LibreOffice",Rich Text Format Document,Documents-Word
-sample,Other,Other,Other
-sedb,Windows,Windows Search,Application
-sfr,Other,Other,Other
-sfv,Other,Simple File Verification,Other
-sgn,Games,Signature File,Application
-sh,VS Code,Unix/Linux Shell Script,Script
-sql,VS Code,SQL Script / Query,Script
-sqlite,SQLite,SQLite Database,Database
-srt,"VLC, Windows Media Player",SubRip Subtitle file,Video
-swf,VLC,Shockwave Flash,Video
-sys,Windows,Windows System File,Application
-tar,"WinRAR, 7-Zip, Linux tar command",Tape Archive,Archive
-thm,"Camera Software, Image Viewers",Thumbnail file,Image
-tmp,Other,Temporary File,Other
-Trashes,Other,Deleted files,Other
-txt,Any Text Editor,Plain Text File,Documents-Text
-url,Other,Other,Other
-wav,"VLC, Windows Media Player",Waveform Audio File Format,Audio
-wmv,"VLC, Windows Media Player",Windows Media Video,Video
+7Z,7-Zip,7-Zip Compressed Archive,Archive
+A6R,Quiz Interactive App,Authorware Runtime,Application
+AC3,"VLC, Windows Media Player",Audio Codec 3,Audio
+ACT,Games,Other,Application
+AVI,"VLC, Windows Media Player, Media Player Classic",Audio Video Interleave,Video
+AXD,Other,ASP.NET Web Handler files,Other
+BIB,"LaTeX editors (TeXstudio, Overleaf), JabRef",BibTeX bibliography file,Documents-BIB
+BIN,Various,Binary File,Application
+BMP,"Paint, Photoshop, Windows Photos, Preview",Bitmap Image File,Image
+BOOT,Linux,Boot Configuration,Application
+C32,Linux,Linux System File,Application
+CACHED,Games,Cache File,Application
+CAT,Windows,Security Catalog File,Application
+CFG,Any Text Editor,Configuration File,Config
+CODE-WORKSPACE,VS Code,Other,Config
+COM,Windows,Executable Command,Application
+CONF,Any Text Editor,Configuration File,Config
+CPK,Games,CRI Middleware Package File,Application
+CRC,Other,Other,Other
+CS,VS Code,C# Source File,Script
+CSS,Any Text Editor,Cascading Style Sheet,Web
+CSV,Microsoft Excel,Comma-Separated Values,Data-Excel
+DAT,Games,Data File,Application
+DB,SQLite,Database File,Database
+DESKTOP,Linux,Linux Shortcut / Launcher,Application
+DJVU,"DjVu Viewer, SumatraPDF",DjVu files,Ebook
+DLL,Windows,Dynamic Link Library,Application
+DOC,Microsoft Word,Microsoft Word 97–2003 Document,Documents-Word
+DOCX,Microsoft Word,Microsoft Word Open XML Document,Documents-Word
+DOTM,Microsoft Word,Microsoft Word Macro-Enabled Template,Documents-Word
+DOWNLOAD,Other,Other,Other
+EML,Microsoft Outlook,Email Message File,Email
+EPUB,"Calibre, Adobe Digital Editions",Electronic Publication,Ebook
+ETL,OS Inspection,Event Trace Log,Application
+EXE,Windows,Executable Command,Application
+FLAC,"VLC, Windows Media Player",Free Lossless Audio Codec,Audio
+FLV,"VLC, Adobe Flash Player",Flash Video,Video
+FPS,Microsoft Outlook,Personal Storage Table (Outlook Data File),Email
+FPX,Microsoft Outlook,Personal Storage Table (Outlook Data File),Email
+GIF,"Paint, Photoshop, Windows Photos, Preview",Graphics Interchange Format,Image
+GZ,"WinRAR, 7-Zip, Gzip",Gzip Compressed Archive,Archive
+HEIC,"Paint, Photoshop, Windows Photos, Preview",High Efficiency Image Container,Image
+HTM,Web Browsers,HyperText Markup,Web
+HTML,Web Browsers,HyperText Markup Language,Web
+IDX,Git,Pack index file,Application
+IIF,Intuit QuickBooks,Intuit Interchange Format,Data-Other
+INF,Windows,Setup Information File,Application
+INI,Windows,Initialization File,Application
+IPYNB,VS Code,IPython Notebook,Script
+JPEG,"Paint, Photoshop, Windows Photos, Preview",Joint Photographic Experts Group,Image
+JPG,"Paint, Photoshop, Windows Photos, Preview",Joint Photographic Experts Group,Image
+JS,VS Code,JavaScript Source File,Script
+JSON,VS Code,JavaScript Object Notation,Data-Other
+JUPYTERLAB-SETTINGS,Jupyter,Jupyter Lab Settings File,Config
+JUPYTERLAB-WORKSPACE,Jupyter,Jupyter Lab Workspace File,Config
+LNG,Exam Interactive App,Language Resource File,Application
+LNK,Windows,Windows Shortcut,Application
+LOADED_0,Other,Other,Other
+LOG,Other,Log File,Other
+M,MATLAB,MATLAB Source File,Script
+M3U,Other,MP3 link,Web
+M4A,"VLC, Windows Media Player",MPEG-4 Audio,Audio
+MAT,MATLAB,MATLAB Data File,Data-Other
+MD,Any Text Editor,Markdown file,Documents-Text
+MDB,Microsoft Access,Microsoft Access Database File,Database
+MKV,"VLC, Windows Media Player",Matroska Video,Video
+MO3,Games,Compressed module music format,Application
+MOV,"VLC, QuickTime Player",QuickTime Movie,Video
+MP3,"VLC, Windows Media Player",MPEG-1 Audio Layer III,Audio
+MP4,"VLC, Windows Media Player",MPEG-4 Part 14,Video
+MPEG,"VLC, Windows Media Player",Moving Picture Experts Group,Video
+MPG,"VLC, Windows Media Player",MPEG Video File,Video
+MRIMGX,Macrium Reflect,Disk Image,SystemBackup
+MSG,Microsoft Outlook,Microsoft Outlook Email Message,Email
+MSI,Windows,Microsoft Installer,Application
+NFO,Windows,System Information File,Application
+NPY,Python (NumPy),NumPy Array File,Data-Other
+NSMP7,Other,Other,Other
+OGG,"VLC, Windows Media Player",Ogg Vorbis Audio File,Audio
+ORF,"Olympus Viewer, Photoshop, Windows Photos",Olympus Raw Format,Image
+OTHER,,,Other
+PACK,Git,Packfile,Application
+PARQUET,"Apache Spark, Pandas, PyArrow, AWS Athena",Apache Parquet File,Data-Other
+PBIX,Microsoft Power BI,Power BI Desktop File,Data-PowerBI
+PCKL,VS Code,Python Pickle file,Data-Other
+PDF,"Adobe Acrobat, Foxit Reader, Preview, Web Browsers",Portable Document Format,Documents-PDF
+PKL,VS Code,Python Pickle File,Data-Other
+PNG,"Paint, Photoshop, Windows Photos, Preview",Portable Network Graphics,Image
+POTX,Microsoft Power Point,PowerPoint Macro-Enabled Template,Data-PowerPoint
+PPT,Microsoft Power Point,Microsoft PowerPoint 97–2003 Presentation,Data-PowerPoint
+PPTM,Microsoft Power Point,PowerPoint Macro-Enabled Presentation,Data-PowerPoint
+PPTX,Microsoft Power Point,Microsoft PowerPoint Open XML Presentation,Data-PowerPoint
+PS1,Windows,Windows PowerShell,Script
+PST,Microsoft Outlook,Personal Storage Table (Outlook Data File),Email
+PTH,Python (PyTorch),PyTorch Model File,Data-Other
+PY,VS Code,Python Source File,Script
+PYC,Python Interpreter,Python Compiled File,Cache
+QST,Quiz Interactive App,Other,Application
+QSZ,Quiz Interactive App,Other,Application
+RAR,"WinRAR, 7-Zip",Roshal Archive,Archive
+RDP,Windows,Microsoft Remote Desktop,Application
+REG,Windows,Windows Registry File,Application
+REGISTRY,Windows,Windows Registry,Application
+REV,Git,Reverse index file,Application
+RTF,"Microsoft Word, WordPad, LibreOffice",Rich Text Format Document,Documents-Word
+SAMPLE,Other,Other,Other
+SEDB,Windows,Windows Search,Application
+SFR,Other,Other,Other
+SFV,Other,Simple File Verification,Other
+SGN,Games,Signature File,Application
+SH,VS Code,Unix/Linux Shell Script,Script
+SQL,VS Code,SQL Script / Query,Script
+SQLITE,SQLite,SQLite Database,Database
+SRT,"VLC, Windows Media Player",SubRip Subtitle file,Video
+SWF,VLC,Shockwave Flash,Video
+SYS,Windows,Windows System File,Application
+TAR,"WinRAR, 7-Zip, Linux tar command",Tape Archive,Archive
+THM,"Camera Software, Image Viewers",Thumbnail file,Image
+TMP,Other,Temporary File,Other
+TRASHES,Other,Deleted files,Other
+TXT,Any Text Editor,Plain Text File,Documents-Text
+URL,Other,Other,Other
+WAV,"VLC, Windows Media Player",Waveform Audio File Format,Audio
+WMV,"VLC, Windows Media Player",Windows Media Video,Video
 X32,Quiz Interactive App,Plugin,Application
-xls,Microsoft Excel,Microsoft Excel 97–2003 Workbook,Data-Excel
-xlsb,Microsoft Excel,Microsoft Excel Binary Workbook,Data-Excel
-xlsm,Microsoft Excel,Microsoft Excel Open XML Macro-Enabled Workbook,Data-Excel
-xlsx,Microsoft Excel,Microsoft Excel Open XML Spreadsheet,Data-Excel
-xml,VS Code,Extensible Markup Language,Data-Other
-xz,Linux,XZ Compressed File,Application
-xzm,Linux,Linux System Module,Application
-yml,VS Code,YAML Files,Data-Other
-zip,"WinRAR, 7-Zip, Windows Explorer",ZIP Archive,Archive
-dot,,,Other
-wiz,,,Other
-pps,,,Other
-xla,,,Other
+XLS,Microsoft Excel,Microsoft Excel 97–2003 Workbook,Data-Excel
+XLSB,Microsoft Excel,Microsoft Excel Binary Workbook,Data-Excel
+XLSM,Microsoft Excel,Microsoft Excel Open XML Macro-Enabled Workbook,Data-Excel
+XLSX,Microsoft Excel,Microsoft Excel Open XML Spreadsheet,Data-Excel
+XML,VS Code,Extensible Markup Language,Data-Other
+XZ,Linux,XZ Compressed File,Application
+XZM,Linux,Linux System Module,Application
+YML,VS Code,YAML Files,Data-Other
+ZIP,"WinRAR, 7-Zip, Windows Explorer",ZIP Archive,Archive
+DOT,,,Other
+WIZ,,,Other
+PPS,,,Other
+XLA,,,Other
