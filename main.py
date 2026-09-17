@@ -33,6 +33,7 @@ from collections import defaultdict
 
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
 # [scan_directories] try while loop / stack approach
+# [operation] validate size if copy or move from different drive
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
@@ -53,6 +54,7 @@ META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
     ]),
     Tags.ACCESS_DT: KeywordFilter(["accessdate", "lastplayed", "lastprinted"]),
     Tags.MODIFY_DT: KeywordFilter(["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]),
+    
 }
 DIR_SCHEMA = {
     "Universal": [("FileHashDupLabel", False), ("FileCategory", True), ("EarliestYear", True)],
@@ -331,8 +333,9 @@ def restore(
         raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in (copy, move)]))
 
     if operation is move:
-        print("MOVE operation selected — original files at the source will be permanently deleted after being moved to the destination")
-        response = input("Proceed? [y/N]: ").strip().lower()
+        base = Warnings.ELEMENTS["base"].build()
+        offset = len(base) - Warnings.ANSI_LEN
+        response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
         if response == "n":
             return pd.DataFrame()
 
@@ -345,7 +348,8 @@ def restore(
     report_path = os.path.join(OUTPUT_DIR_PATH, report_name)
     if not os.path.exists(report_path):
         raise FileNotFoundError(f"Report not found: {report_path}")
-    files_df = pd.read_csv(report_path)[[Cols.dest(Cols.ROOT), Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.FILE_DIR_PATH), Cols.FILE_PATH]]
+    files_df = pd.read_csv(report_path)
+    files_df = files_df[[Cols.dest(Cols.ROOT), Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.FILE_DIR_PATH), Cols.FILE_PATH]]
     files_df = files_df.rename(columns={
         Cols.dest(Cols.ROOT): Cols.ROOT,
         Cols.dest(Cols.FILE_ID): Cols.FILE_ID,
@@ -372,7 +376,7 @@ def restore(
     return files_df
 
 def organise(
-        src_roots: str | list[str],
+        src_roots: list[str],
         dest_root: str,
         operation: Callable,
         config: Config,
@@ -419,14 +423,18 @@ def organise(
 
     # Validate and select source roots
     root_locs = inspect_directories(src_roots)
-    root_configs = build_processing_configs(root_locs)
+
+    if len(src_roots) == 1 and src_roots[0] == dest_root:
+        processing_configs = {path: DirProcessingConfig(start_depth=0, target_depth=dir_loc.depth) for path, dir_loc in root_locs.items()}
+    else:
+        processing_configs = build_processing_configs(root_locs)
 
     # Extract files to process
     file_records = []
-    for path, root_config in root_configs.items():
-        for depth, dirpath, filenames in iter_dir_tree(path, root_config.start_depth, root_config.target_depth):
+    for path, path_config in processing_configs.items():
+        for depth, dirpath, filenames in iter_dir_tree(path, path_config.start_depth, path_config.target_depth):
             for filename in filenames:
-                file_records.append((path, root_config.target_depth, dirpath, depth, filename))
+                file_records.append((path, path_config.target_depth, dirpath, depth, filename))
 
     if not file_records:
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
@@ -448,6 +456,7 @@ def organise(
     reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
     # Check if there is enough space to process files
+
     if operation is copy:
         required = files_df[Cols.SIZE].sum()
         _, _, free = shutil.disk_usage(dest_root)
@@ -513,14 +522,13 @@ def organise(
         n_filtered = n_total - len(files_df)
         print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=n_filtered/n_total)) #--- Notification ---
 
-    if files_df.empty:
-        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
+        if files_df.empty:
+            raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     # Resolve dest dir schema
     if dir_schema:
         resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
         dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
-        
         # Calculate dims features
         dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser, tagstore=tagstore)
         for dims in resolved_dir_schema.values():
@@ -557,6 +565,24 @@ def organise(
     return files_df
 
 def main(command: str = "organise"):
+
+
+    # parser = argparse.ArgumentParser(description="File organiser")
+    # subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # # organise command
+    # org = subparsers.add_parser("organise", help="organise files")
+    # org.add_argument("--src", nargs="+", required=True, help="source root(s)")
+    # org.add_argument("--dest", required=True, help="destination root")
+    # org.add_argument("--operation", choices=["copy", "move"], default="copy")
+    # org.add_argument("--clear-cache", action="store_true")
+
+    # # restore command
+    # res = subparsers.add_parser("restore", help="restore from a report")
+    # res.add_argument("--report", required=True, help="report file name")
+    # res.add_argument("--operation", choices=["copy", "move"], default="move")
+
+    # args = parser.parse_args()
 
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)

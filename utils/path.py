@@ -146,10 +146,10 @@ def iter_dir_tree(path: str, start_depth: int = 0, target_depth: int = 0) -> Ite
     
     for root, dirs, files in os.walk(path):
         
-        relative_depth = depth_from_path(root, path)
+        current_depth = depth_from_path(root, path)
 
-        if relative_depth >= target_depth:
+        if current_depth >= target_depth:
             dirs[:] = []
 
-        if relative_depth >= start_depth:
-            yield relative_depth, root, files
+        if current_depth >= start_depth:
+            yield current_depth, root, files
