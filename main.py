@@ -1,12 +1,13 @@
+import argparse
 from enum import StrEnum, auto
 from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
 from cli.tokens import Color
+from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
 from core.parser import DateParser
 from core.cache import Cache
 from core.exif import Exif
 from core.categories import Category, CategorySelection
 from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
-from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
 from dataclasses import dataclass
 from dataframe.pipeline import FilterRows
 from dataframe.col_filter import ColumnFilter, NameFilter, KeywordFilter, CombinedFilter
@@ -274,9 +275,10 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
             try:
                 os.rmdir(dir_to_del)
             except OSError as e:
-                errors.append(Errors.ELEMENTS["exception"].build(indent=3, path=dirs_to_del, errno=e.errno)) #--- Error ---
+                errors.append(Errors.ELEMENTS["exception"].build(indent=3, path=dir_to_del, errno=e.errno)) #--- Error ---
     if errors:
         print("\n".join(errors))
+
     # Post operation cache sync
     # Identify successfully completed operation cases
     completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.INODE_DEV), Cols.dest(Cols.INODE)]]
@@ -386,11 +388,12 @@ def organise(
     ) -> pd.DataFrame:
 
     op_name = operation.__name__
+    is_cross_drive = {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
+    drive_scope = "ACROSS DRIVES" if is_cross_drive else "ON THE SAME DRIVE"
+    print(f"{op_name.upper()} FILES {drive_scope}")
 
     if operation not in (copy, move):
         raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in (copy, move)])) #--- Error ---
-
-    print(f"{op_name.upper()} FILES")
 
     if operation is move:
         base = Warnings.ELEMENTS["base"].build()
@@ -448,9 +451,7 @@ def organise(
     reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
     # Check if there is enough space to process files
-    src_drives = {get_drive(src_root) for src_root in src_roots}
-    dest_drive = get_drive(dest_root)
-    if operation is copy or (operation is move and src_drives != dest_drive):
+    if operation is copy or (operation is move and is_cross_drive):
         required = files_df[Cols.SIZE].sum()
         _, _, free = shutil.disk_usage(dest_root)
         if required >= free:
@@ -556,25 +557,25 @@ def organise(
 
     return files_df
 
-def main(command: str = "organise"):
+def main():
 
+    parser = argparse.ArgumentParser(description="File organiser")
+    parser.add_argument("action", choices=["organise", "restore"])
+    args = parser.parse_args()
 
-    # parser = argparse.ArgumentParser(description="File organiser")
-    # subparsers = parser.add_subparsers(dest="command", required=True)
+    # subparsers = parser.add_subparsers(dest="action", required=True)
+    # org = subparsers.add_parser("organise")
+    # res = subparsers.add_parser("restore")
 
     # # organise command
-    # org = subparsers.add_parser("organise", help="organise files")
     # org.add_argument("--src", nargs="+", required=True, help="source root(s)")
     # org.add_argument("--dest", required=True, help="destination root")
     # org.add_argument("--operation", choices=["copy", "move"], default="copy")
     # org.add_argument("--clear-cache", action="store_true")
 
     # # restore command
-    # res = subparsers.add_parser("restore", help="restore from a report")
     # res.add_argument("--report", required=True, help="report file name")
     # res.add_argument("--operation", choices=["copy", "move"], default="move")
-
-    # args = parser.parse_args()
 
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)
@@ -591,7 +592,7 @@ def main(command: str = "organise"):
 
     category_selection = CategorySelection().get()
 
-    if command == "organise":
+    if args.action == "organise":
        organise(
             # src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
             src_roots = ["D:\\MyOrganizedFiles"],
@@ -603,12 +604,14 @@ def main(command: str = "organise"):
             clear_cache=False,
         )
 
-    elif command == "restore":
+    elif args.action == "restore":
         restore(
             report_name="organise_20260916T145535.csv",
             operation=move,
             config=config
         )
+    else:
+        print(args.action)
 
 if __name__ == "__main__":
     main()

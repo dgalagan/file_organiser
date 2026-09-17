@@ -79,7 +79,7 @@ class Errors(Component):
              Template()
              .token(ICON)
              .token(SEPARATOR)
-             .message("Failed {path}: [{errno}]")
+             .message("Error {errno}: {path}")
         ),
         "unknown_value":(
             Template()
