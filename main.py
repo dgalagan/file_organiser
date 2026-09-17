@@ -6,7 +6,6 @@ from core.cache import Cache
 from core.exif import Exif
 from core.categories import Category, CategorySelection
 from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
-from core.tagstore import TagStore
 from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
 from dataclasses import dataclass
 from dataframe.pipeline import FilterRows
@@ -57,7 +56,7 @@ META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
     
 }
 DIR_SCHEMA = {
-    "Universal": [("FileHashDupLabel", False), ("FileCategory", True), ("EarliestYear", True)],
+    "Universal": [("FileHashDupLabel", True), ("FileCategory", True), ("EarliestYear", True)],
     "Image": [("ImageCountry", True), ("EXIF:Model", True)],
     "Data-Excel": [("WorksheetsCount", True)]
 }
@@ -250,15 +249,15 @@ def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
                 dirs_to_del[level+1].add(dir_to_del)
     return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
 
-def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cache, metadata: Cache, tagstore: TagStore = None):
+def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cache, metadata: Cache):
 
     op_name = operation.__name__
 
     # Execute operation
     tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
     files_df[op_name] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[Cols.dest(Cols.FILE_PATH)]), axis=1)
-    files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"], tagstore=tagstore).run(files_df)
-    files_df = add_file_id(prefix="Dest", tagstore=tagstore).run(files_df)
+    files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"]).run(files_df)
+    files_df = add_file_id(prefix="Dest").run(files_df)
 
     n_total = len(files_df)
     n_succeeded = len(files_df[op_name].loc[files_df[op_name].isna()])
@@ -400,15 +399,6 @@ def organise(
         if response == "n":
             return pd.DataFrame()
 
-    # Init tagstore
-    """
-    TagStore maps tags to the metadata columns present in a run. The set of possible
-    columns is finite, but the subset present varies per run and new files may introduce
-    unseen ones. Since assignments are cheap to recompute from the current columns via
-    fixed rules, TagStore is built fresh per run and kept in memory rather than persisted.
-    """
-    tagstore = TagStore()
-
     # Load cache
     register, metadata = config.register, config.metadata
     for cache in (register, metadata):
@@ -452,9 +442,9 @@ def organise(
 
     files_df[Cols.EXIF_ARGS] = "".join(EXIFTOOL_ARGS)
     files_df[Cols.dest(Cols.ROOT)] = dest_root
-    files_df = assemble_file_path(prefix="", tagstore=tagstore).run(files_df)
-    files_df = add_stat(prefix="", metrics=["st_size", "st_mtime", "st_dev", "st_ino"], tagstore=tagstore).run(files_df)
-    files_df = add_file_id(prefix="", tagstore=tagstore).run(files_df)
+    files_df = assemble_file_path(prefix="").run(files_df)
+    files_df = add_stat(prefix="", metrics=["st_size", "st_mtime", "st_dev", "st_ino"]).run(files_df)
+    files_df = add_file_id(prefix="").run(files_df)
     reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
     # Check if there is enough space to process files
@@ -513,7 +503,7 @@ def organise(
 
     # Enrich files with exif metadata
     files_df = files_df.merge(metadata_df, how="left", left_on=Cols.FILE_ID, right_index=True)
-    files_df = consolidate_file_ext(tagstore=tagstore).run(files_df)
+    files_df = consolidate_file_ext().run(files_df)
 
     # Get categories from ref
     files_df = files_df.merge(config.ref[[Cols.FILE_EXT, Cols.FILE_CATEGORY]], how="left", left_on=Cols.CONSOLIDATED_EXT, right_on=Cols.FILE_EXT)
@@ -532,7 +522,7 @@ def organise(
         resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
         dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
         # Calculate dims features
-        dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser, tagstore=tagstore)
+        dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser)
         for dims in resolved_dir_schema.values():
             for dim in dims:
                 if dim in files_df.columns:
@@ -543,13 +533,13 @@ def organise(
                     raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=dims_calc.keys())) #--- Error ---
         # Asemble dest dir per category
         for cat, dims in dims_per_category.items():
-            files_df = assemble_dest_dir(dest_root, file_category=cat, dims=dims, tagstore=tagstore).run(files_df)
+            files_df = assemble_dest_dir(dest_root, file_category=cat, dims=dims).run(files_df)
     else:
         # Everything goes to root dir
-        files_df = assemble_dest_dir(dest_root, tagstore=tagstore).run(files_df)
+        files_df = assemble_dest_dir(dest_root).run(files_df)
 
     # Assemble dest file path
-    files_df = assemble_file_path(prefix="Dest", tagstore=tagstore).run(files_df)
+    files_df = assemble_file_path(prefix="Dest").run(files_df)
 
     # Execute operation
     files_df = execute_operation(files_df, operation, register, metadata)

@@ -3,7 +3,6 @@ from dataframe.pipeline import Pipeline, FilterRows, Compute, Label, ExpandDict
 from dataframe.col_filter import NameFilter
 from dataframe.processor import ElementProcessor, RowProcessor, ColProcessor
 from dataframe.predicate import Predicate, Condition, And, Or, AllRows
-from core.tagstore import TagStore
 import datetime as dt
 import pandas as pd
 from utils.path import parse_filename
@@ -124,7 +123,7 @@ def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> 
 #### DF PIPELINE FUNCTIONS ####
 ###############################
 
-def assemble_file_path(prefix: Literal["", "Dest"], tagstore: TagStore = None):
+def assemble_file_path(prefix: Literal["", "Dest"]):
 
     file_dir_path = Cols.dest(Cols.FILE_DIR_PATH) if prefix else Cols.FILE_DIR_PATH
     file_path = Cols.dest(Cols.FILE_PATH) if prefix else Cols.FILE_PATH
@@ -134,13 +133,11 @@ def assemble_file_path(prefix: Literal["", "Dest"], tagstore: TagStore = None):
             [
                 Compute(
                     ColProcessor(duplicated_ci, keep="first"), NameFilter(Cols.FILE_NAME),
-                    dest_col=Cols.dup(Cols.FILE_NAME),
-                    tagstore=tagstore
+                    dest_col=Cols.dup(Cols.FILE_NAME)
                 ),
                 Compute(
                     RowProcessor(build_file_path), NameFilter([file_dir_path, Cols.FILE_NAME, Cols.dup(Cols.FILE_NAME), Cols.INODE]),
-                    dest_col=file_path,
-                    tagstore=tagstore
+                    dest_col=file_path
                 ),
             ]
         )
@@ -148,19 +145,17 @@ def assemble_file_path(prefix: Literal["", "Dest"], tagstore: TagStore = None):
         [
             Compute(
                 RowProcessor(build_file_path), NameFilter([file_dir_path, Cols.FILE_NAME]),
-                dest_col=file_path,
-                tagstore=tagstore
+                dest_col=file_path
             )
         ]
     )
 
-def add_stat(prefix: Literal["", "Dest"], metrics: Literal["st_size", "st_mtime", "st_dev", "st_ino"], tagstore: TagStore = None):
+def add_stat(prefix: Literal["", "Dest"], metrics: Literal["st_size", "st_mtime", "st_dev", "st_ino"]):
     return Pipeline(
         [
             Compute(
                 ElementProcessor(safe_stat, metrics=metrics, prefix=prefix), NameFilter(Cols.prefix(Cols.FILE_PATH, prefix)),
-                dest_col=Cols.prefix(Cols.FILE_STAT, prefix),
-                tagstore=tagstore
+                dest_col=Cols.prefix(Cols.FILE_STAT, prefix)
             ),
             ExpandDict(
                 col=Cols.prefix(Cols.FILE_STAT, prefix),
@@ -169,41 +164,36 @@ def add_stat(prefix: Literal["", "Dest"], metrics: Literal["st_size", "st_mtime"
         ]
     )
 
-def add_file_id(prefix: Literal["", "Dest"], tagstore: TagStore = None):
+def add_file_id(prefix: Literal["", "Dest"]):
     return Compute(
         RowProcessor(get_id, prefix=prefix), NameFilter([Cols.prefix(Cols.INODE_DEV, prefix), Cols.prefix(Cols.INODE, prefix)]),
-        dest_col=Cols.prefix(Cols.FILE_ID, prefix),
-        tagstore=tagstore
+        dest_col=Cols.prefix(Cols.FILE_ID, prefix)
     )
 
-def consolidate_file_ext(tagstore: TagStore = None):
+def consolidate_file_ext():
     return Compute(
         RowProcessor(resolve_ext), NameFilter([Cols.FILE_TYPE_EXT, Cols.FILE_NAME]),
-        dest_col=Cols.CONSOLIDATED_EXT,
-        tagstore=tagstore
+        dest_col=Cols.CONSOLIDATED_EXT
     )
 
-def prepare_dimensions_calc(geocoder: RGeocoder, date_cols: list[str], date_parser: DateParser, tagstore: TagStore = None):
+def prepare_dimensions_calc(geocoder: RGeocoder, date_cols: list[str], date_parser: DateParser):
     return {
         Cols.label(Cols.dup(Cols.FILE_HASH)): Pipeline(
             [
                 Compute(
                     ColProcessor(duplicated, keep=False), NameFilter(Cols.SIZE),
                     dest_col=Cols.dup(Cols.SIZE),
-                    where=Condition(Cols.SIZE, "notna"),
-                    tagstore=tagstore
+                    where=Condition(Cols.SIZE, "notna")
                 ),
                 Compute(
                     ElementProcessor(calc_full_hash), NameFilter(Cols.FILE_PATH),
                     dest_col=Cols.FILE_HASH,
-                    where=Condition(Cols.dup(Cols.SIZE), "eq", True),
-                    tagstore=tagstore
+                    where=Condition(Cols.dup(Cols.SIZE), "eq", True)
                 ),
                 Compute(
                     ColProcessor(duplicated, keep="first"), NameFilter(Cols.FILE_HASH),
                     dest_col=Cols.dup(Cols.FILE_HASH),
-                    where=Condition(Cols.dup(Cols.SIZE), "eq", True),
-                    tagstore=tagstore
+                    where=Condition(Cols.dup(Cols.SIZE), "eq", True)
                 ),
                 Label(
                     dest_col=Cols.label(Cols.dup(Cols.FILE_HASH)),
@@ -220,34 +210,29 @@ def prepare_dimensions_calc(geocoder: RGeocoder, date_cols: list[str], date_pars
         Cols.EARLIEST_YEAR: Pipeline(
             [
                 Compute(
-                    ElementProcessor(date_parser.parse), NameFilter(date_cols),
-                    tagstore=tagstore
+                    ElementProcessor(date_parser.parse), NameFilter(date_cols)
                 ),
                 Compute(
                     RowProcessor(get_earliest_year), NameFilter(date_cols),
-                    dest_col=Cols.EARLIEST_YEAR,
-                    tagstore=tagstore
+                    dest_col=Cols.EARLIEST_YEAR
                 )
             ]
         ),
         Cols.IMAGE_COUNTRY: Compute(
             RowProcessor(get_country, geocoder=geocoder), NameFilter([Cols.EXIF_GPS_LATITUDE, Cols.EXIF_GPS_LONGITUDE]),
             dest_col=Cols.IMAGE_COUNTRY,
-            where=Condition(Cols.FILE_CATEGORY, "eq", "Image"),
-            tagstore=tagstore
+            where=Condition(Cols.FILE_CATEGORY, "eq", "Image")
         ),
         Cols.WORKSHEETS_COUNT: Compute(
             ElementProcessor(get_worksheets_count, target_headings=["Worksheets", "Листы"]), NameFilter(Cols.XML_HEADING_PAIRS), 
             dest_col=Cols.WORKSHEETS_COUNT,
-            where=Condition(Cols.FILE_CATEGORY, "eq", "Data-Excel"),
-            tagstore=tagstore
+            where=Condition(Cols.FILE_CATEGORY, "eq", "Data-Excel")
         )
     }
 
-def assemble_dest_dir(dest_root: str, file_category: str = None, dims: list[str] = None, tagstore: TagStore = None):
+def assemble_dest_dir(dest_root: str, file_category: str = None, dims: list[str] = None):
     return Compute(
         RowProcessor(build_dir_path, root=dest_root, dims=dims),
         dest_col=Cols.dest(Cols.FILE_DIR_PATH),
-        where=Condition(Cols.FILE_CATEGORY, "eq", file_category) if file_category else AllRows(),
-        tagstore=tagstore
+        where=Condition(Cols.FILE_CATEGORY, "eq", file_category) if file_category else AllRows()
     )

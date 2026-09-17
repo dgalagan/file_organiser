@@ -4,7 +4,6 @@ import pandas as pd
 from dataframe.col_filter import ColumnFilter, AllCols
 from dataframe.processor import Processor
 from dataframe.predicate import Predicate
-from core.tagstore import TagStore
 
 @dataclass
 class Step(ABC):
@@ -66,7 +65,6 @@ class Compute(Step):
     col_filter: ColumnFilter = field(default_factory=AllCols)
     dest_col: str = None
     where: Predicate = None
-    tagstore: TagStore = None
 
     def run(self, df: pd.DataFrame):
         cols = self.col_filter.select(df.columns)
@@ -79,14 +77,10 @@ class Compute(Step):
             if self.dest_col not in df.columns:
                 df[self.dest_col] = None
             df.loc[mask, self.dest_col] = result.squeeze() # dtype misalignment issue
-            if self.tagstore:
-                self.tagstore.assign_tag([self.dest_col], "new")
             # df[self.dest_col] = result.reindex(df.index, fill_value=None)
         else:
             df[cols] = None
             df.loc[mask, cols] = result
-            if self.tagstore:
-                self.tagstore.assign_tag(cols, "transformed")
             # df[cols] = result.reindex(df.index, fill_value=None)
         return df
 
