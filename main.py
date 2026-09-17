@@ -21,7 +21,7 @@ from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
 from typing import Callable, Literal
-from utils.path import iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
+from utils.path import get_drive, iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
 from collections import defaultdict
 
 ###############################
@@ -276,7 +276,8 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
                 os.rmdir(dir_to_del)
             except OSError as e:
                 errors.append(Errors.ELEMENTS["exception"].build(indent=3, path=dirs_to_del, errno=e.errno)) #--- Error ---
-    print("\n".join(errors))
+    if errors:
+        print("\n".join(errors))
     # Post operation cache sync
     # Identify successfully completed operation cases
     completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.INODE_DEV), Cols.dest(Cols.INODE)]]
@@ -426,6 +427,7 @@ def organise(
 
     if len(src_roots) == 1 and src_roots[0] == dest_root:
         processing_configs = {path: DirProcessingConfig(start_depth=0, target_depth=dir_loc.depth) for path, dir_loc in root_locs.items()}
+        file_categories = None
     else:
         processing_configs = build_processing_configs(root_locs)
 
@@ -456,8 +458,9 @@ def organise(
     reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
     # Check if there is enough space to process files
-
-    if operation is copy:
+    src_drives = {get_drive(src_root) for src_root in src_roots}
+    dest_drive = get_drive(dest_root)
+    if operation is copy or (operation is move and src_drives != dest_drive):
         required = files_df[Cols.SIZE].sum()
         _, _, free = shutil.disk_usage(dest_root)
         if required >= free:
@@ -521,7 +524,6 @@ def organise(
         files_df = FilterRows(Condition(Cols.FILE_CATEGORY, "isin", file_categories)).run(files_df)
         n_filtered = n_total - len(files_df)
         print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=n_filtered/n_total)) #--- Notification ---
-
         if files_df.empty:
             raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
