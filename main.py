@@ -30,10 +30,8 @@ from collections import defaultdict
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
-
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
 # [scan_directories] try while loop / stack approach
-# [operation] validate size if copy or move from different drive
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
 # [df] develop partial hash function
 # [df] in Combined filter if selected empty return AllCols
@@ -61,6 +59,14 @@ DIR_SCHEMA = {
     "Image": [("ImageCountry", True), ("EXIF:Model", True)],
     "Data-Excel": [("WorksheetsCount", True)]
 }
+
+# FileHashDupLabel
+#     |__FileCategory
+#         |__EarliestYear
+#             |__ImageCountry
+#                 |__Model
+#             |__WorksheetsCount
+
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 
 @dataclass
@@ -245,7 +251,7 @@ def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
         relpath = os.path.relpath(row[Cols.FILE_DIR_PATH], row[Cols.ROOT])
         if relpath != '.':
             dir_parts = relpath.split(os.sep)
-            for level in range(len(dir_parts)):
+            for level in range(len(dir_parts)): # ensure consistent naming
                 dir_to_del = os.path.join(row[Cols.ROOT], os.sep.join(dir_parts[:level+1]))
                 dirs_to_del[level+1].add(dir_to_del)
     return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
@@ -351,6 +357,8 @@ def restore(
     if not os.path.exists(report_path):
         raise FileNotFoundError(f"Report not found: {report_path}")
     files_df = pd.read_csv(report_path)
+    if files_df.empty:
+        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
     files_df = files_df[[Cols.dest(Cols.ROOT), Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.FILE_DIR_PATH), Cols.FILE_PATH]]
     files_df = files_df.rename(columns={
         Cols.dest(Cols.ROOT): Cols.ROOT,
@@ -359,10 +367,6 @@ def restore(
         Cols.dest(Cols.FILE_PATH): Cols.FILE_PATH,
         Cols.FILE_PATH: Cols.dest(Cols.FILE_PATH)
     })
-
-    if files_df.empty:
-        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
-
     files_df = execute_operation(files_df, operation, register, metadata)
 
     # Save summary
@@ -419,8 +423,8 @@ def organise(
     root_locs = inspect_directories(src_roots)
 
     if len(src_roots) == 1 and src_roots[0] == dest_root:
-        processing_configs = {path: DirProcessingConfig(start_depth=0, target_depth=dir_loc.depth) for path, dir_loc in root_locs.items()}
         file_categories = None
+        processing_configs = {path: DirProcessingConfig(start_depth=0, target_depth=dir_loc.depth) for path, dir_loc in root_locs.items()}
     else:
         processing_configs = build_processing_configs(root_locs)
 
@@ -520,6 +524,7 @@ def organise(
 
     # Resolve dest dir schema
     if dir_schema:
+        # dispatched_dir_schema = {cat: [dim for dim, enabled in dir_schema.get(cat, dir_schema["Default"])] for cat in files_df[Cols.FILE_CATEGORY].unique()}
         resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
         dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
         # Calculate dims features
@@ -595,7 +600,7 @@ def main():
     if args.action == "organise":
        organise(
             # src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
-            src_roots = ["D:\\MyOrganizedFiles"],
+            src_roots=["D:\\MyOrganizedFiles"],
             dest_root="D:\\MyOrganizedFiles",
             operation=move,
             config=config,

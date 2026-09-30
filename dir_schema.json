@@ -1,0 +1,23 @@
+{
+    "Default": [
+        // ["FileCategory", true],
+        ["FileHashDupLabel", true],
+        ["EarliestYear", true]
+    ],
+    "Image": [
+        // ["FileCategory", true],
+        ["FileHashDupLabel", true],
+        ["EarliestYear", true],
+        ["ImageCountry", true],
+        ["EXIF:Model", true]
+    ],
+    "Data-Excel": [
+        // ["FileCategory", true],
+        ["FileHashDupLabel", true],
+        ["EarliestYear", true],
+        ["WorksheetsCount", true]
+    ]
+}
+
+
+

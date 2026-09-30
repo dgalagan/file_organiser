@@ -104,7 +104,7 @@ def get_worksheets_count(heading_pairs: list, target_headings: list[str] = []) -
 #         return {"hash": combined_hash.hexdigest()}
 #     except PermissionError:
 #         return {"hash": ""}
-    
+
 def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> str:
     try:
         # hashlib.algorithms_available
