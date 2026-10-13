@@ -20,6 +20,10 @@ CACHE_DIR_PATH = os.path.join(PROJECT_ROOT, CACHE_DIR)
 METADATA_PATH = os.path.join(CACHE_DIR_PATH, CACHE_METADATA)
 REGISTER_PATH = os.path.join(CACHE_DIR_PATH, CACHE_REGISTER)
 
+# --- Dir Schema ---
+DIR_SCHEMA = "dir_schema.json"
+DIR_SCHEMA_PATH = os.path.join(PROJECT_ROOT, DIR_SCHEMA)
+
 # --- Output ---
 OUTPUT_DIR = "output"
 OUTPUT_DIR_PATH = os.path.join(PROJECT_ROOT, OUTPUT_DIR)

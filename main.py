@@ -2,7 +2,7 @@ import argparse
 from enum import StrEnum, auto
 from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
 from cli.tokens import Color
-from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH
+from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH, DIR_SCHEMA_PATH
 from core.parser import DateParser
 from core.cache import Cache
 from core.exif import Exif
@@ -15,6 +15,7 @@ from dataframe.predicate import Condition
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
 from datetime import datetime
+import json
 import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
@@ -30,6 +31,8 @@ from collections import defaultdict
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
+# [info] File Category becomes primary key and will be used as base dir hierarchy dimension under which all other dimensions will be stored
+
 # [scan_directories] instead of os.walk(), create recursion based on os.scandir()
 # [scan_directories] try while loop / stack approach
 # [df] rename Predicate class into RowMask or RowFilter, remove where from Compute and Transform
@@ -54,18 +57,21 @@ META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
     Tags.MODIFY_DT: KeywordFilter(["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]),
     
 }
-DIR_SCHEMA = {
-    "Universal": [("FileHashDupLabel", True), ("FileCategory", True), ("EarliestYear", True)],
-    "Image": [("ImageCountry", True), ("EXIF:Model", True)],
-    "Data-Excel": [("WorksheetsCount", True)]
-}
+# DIR_SCHEMA = {
+#     "Universal": [("FileHashDupLabel", True), ("FileCategory", True), ("EarliestYear", True)],
+#     "Image": [("ImageCountry", True), ("EXIF:Model", True)],
+#     "Data-Excel": [("WorksheetsCount", True)]
+# }
 
-# FileHashDupLabel
-#     |__FileCategory
-#         |__EarliestYear
-#             |__ImageCountry
-#                 |__Model
-#             |__WorksheetsCount
+# [Category 1]
+#   |__FileHashDupLabel
+#      |__EarliestYear
+#         |__Category Specific Dim
+# [Category 2]
+#   |__FileHashDupLabel
+#      |__EarliestYear
+#         |__Category Specific Dim
+
 
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 
@@ -78,6 +84,7 @@ class Config:
     csv_writer: CSVWriter
     geocoder: RGeocoder
     parser: DateParser
+    dir_schema: dict[str: list[tuple[str, bool]]]
 
 @dataclass
 class DirLoc:
@@ -120,7 +127,7 @@ def show_directories_tree(dir_loc_map: dict[str, DirLoc], coverage_bar: dict[str
     # Containers
     dir_structure: list[str] = []
     seen_paths: list[str] = []
-
+    
     # Execution
     for path, dir_loc in dir_loc_map.items():
         # Check parents in seen
@@ -325,6 +332,9 @@ def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
         case "GB": return int(n_bytes / 1024 ** 3)
         case "TB": return int(n_bytes / 1024 ** 4)
 
+def load_json(path: str):
+    with open(path, 'r') as f:
+        return json.load(f)
 ###############################
 ####### MAIN FUNCTIONS ########
 ###############################
@@ -387,7 +397,7 @@ def organise(
         operation: Callable,
         config: Config,
         file_categories: list[Category] = None,
-        dir_schema: dict[str, list[str]] = None,
+        # dir_schema: dict[str, list[str]] = None,
         clear_cache: bool = False,
     ) -> pd.DataFrame:
 
@@ -418,6 +428,9 @@ def organise(
     exif = config.exif
     geocoder = config.geocoder
     date_parser = config.parser
+
+    # Load ref, dir_schema
+    dir_schema = config.dir_schema
 
     # Validate and select source roots
     root_locs = inspect_directories(src_roots)
@@ -523,26 +536,44 @@ def organise(
             raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     # Resolve dest dir schema
-    if dir_schema:
-        # dispatched_dir_schema = {cat: [dim for dim, enabled in dir_schema.get(cat, dir_schema["Default"])] for cat in files_df[Cols.FILE_CATEGORY].unique()}
-        resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
-        dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
-        # Calculate dims features
-        dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser)
-        for dims in resolved_dir_schema.values():
-            for dim in dims:
+    dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser)
+    for cat in files_df[Cols.FILE_CATEGORY].unique():
+        common_prefix = os.path.join(dest_root, cat)
+        if dir_schema:
+            enabled_dims = [dir_dim for dir_dim, enabled in dir_schema.get(cat, dir_schema["Default"]) if enabled]
+            for dim in enabled_dims:
                 if dim in files_df.columns:
                     continue
                 elif dim in dims_calc:
                     files_df = dims_calc[dim].run(files_df)
                 else:
                     raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=dims_calc.keys())) #--- Error ---
+            # Asemble dest dir per category
+            files_df = assemble_dest_dir(common_prefix, file_category=cat, dims=enabled_dims).run(files_df)
+        else:
+            # Everything goes to root dir
+            files_df = assemble_dest_dir(common_prefix).run(files_df)
+        
+        # dispatched_dir_schema = {cat: [dim for dim, enabled in dir_schema.get(cat, dir_schema["Default"]) if enabled] for cat in files_df[Cols.FILE_CATEGORY].unique()}
+        # resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
+        # dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
+        # Calculate dims features
+        # dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser)
+        # for dims in dispatched_dir_schema.values():
+            # for dim in dims:
+                # if dim in files_df.columns:
+                    # continue
+                # elif dim in dims_calc:
+                    # files_df = dims_calc[dim].run(files_df)
+                # else:
+                    # raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=dims_calc.keys())) #--- Error ---
         # Asemble dest dir per category
-        for cat, dims in dims_per_category.items():
-            files_df = assemble_dest_dir(dest_root, file_category=cat, dims=dims).run(files_df)
-    else:
+        # for cat, dims in dispatched_dir_schema.items():
+            # common_prefix = os.path.join(dest_root, cat)
+            # files_df = assemble_dest_dir(common_prefix, file_category=cat, dims=dims).run(files_df)
+    # else:
         # Everything goes to root dir
-        files_df = assemble_dest_dir(dest_root).run(files_df)
+        # files_df = assemble_dest_dir(common_prefix).run(files_df)
 
     # Assemble dest file path
     files_df = assemble_file_path(prefix="Dest").run(files_df)
@@ -563,7 +594,6 @@ def organise(
     return files_df
 
 def main():
-
     parser = argparse.ArgumentParser(description="File organiser")
     parser.add_argument("action", choices=["organise", "restore"])
     args = parser.parse_args()
@@ -588,11 +618,12 @@ def main():
     config = Config(
         register=Cache(path=REGISTER_PATH, writer=json_writer, loader=json_loader),
         metadata=Cache(path=METADATA_PATH, writer=json_writer, loader=json_loader),
-        ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"), #
+        ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"), # review  encoding issue
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
         csv_writer=CSVWriter(encoding="utf-8-sig"),
         geocoder=RGeocoder(mode=1, verbose=False),
         parser=DateParser(),
+        dir_schema=load_json(DIR_SCHEMA_PATH)
     )
 
     category_selection = CategorySelection().get()
@@ -605,7 +636,7 @@ def main():
             operation=move,
             config=config,
             file_categories=category_selection,
-            dir_schema=DIR_SCHEMA,
+            # dir_schema=DIR_SCHEMA,
             clear_cache=False,
         )
 
