@@ -2,15 +2,16 @@ import argparse
 from enum import StrEnum, auto
 from cli.components import Notifications, Warnings, Errors, Prompt, TQDMDesc
 from cli.tokens import Color
-from constants import Tags, Cols, PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH, DIR_SCHEMA_PATH
-from core.parser import DateParser
+from constants import PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH, DIR_SCHEMA_PATH
 from core.cache import Cache
+from core.col_names import ColNames, dest
+from core.col_filter_presets import registry_cols, metadata_cols, date_cols
+from core.parser import DateParser
 from core.exif import Exif
 from core.categories import Category, CategorySelection
-from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, prepare_dimensions_calc, assemble_dest_dir
+from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, build_dims_calculator, assemble_dest_dir
 from dataclasses import dataclass
 from dataframe.pipeline import FilterRows
-from dataframe.col_filter import ColumnFilter, NameFilter, KeywordFilter, CombinedFilter
 from dataframe.predicate import Condition
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
@@ -46,22 +47,7 @@ EXIFTOOL_PATH = "D:/Development/Software/Projects/file_organiser/bin/exif/exifto
 EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
 EXIFTOOL_ENCODING = "utf-8"
 EXIFTOOL_BATCH_SIZE = 50
-META_DATE_TAGS: list[str] = [Tags.CREATE_DT, Tags.ACCESS_DT, Tags.MODIFY_DT]
-META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
-    Tags.CREATE_DT: CombinedFilter([
-        NameFilter([Cols.ID3_YEAR, Cols.EXE_TIMESTAMP, Cols.XMP_TIMESTAMP, Cols.PNG_DATETIME, Cols.COMPOSITE_DATETIME, Cols.QT_PURCHASE_DATE]),
-        KeywordFilter(["createdate", "creationdate", "createddatetime", "datetimeoriginal", "datetimedigitized", "datetimecreated"])
-        # "encodingtime", "profiledatetime", "retaildate", "ripdate", "releasetime", "originalreleaseyear"
-    ]),
-    Tags.ACCESS_DT: KeywordFilter(["accessdate", "lastplayed", "lastprinted"]),
-    Tags.MODIFY_DT: KeywordFilter(["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"]),
-    
-}
-# DIR_SCHEMA = {
-#     "Universal": [("FileHashDupLabel", True), ("FileCategory", True), ("EarliestYear", True)],
-#     "Image": [("ImageCountry", True), ("EXIF:Model", True)],
-#     "Data-Excel": [("WorksheetsCount", True)]
-# }
+TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
 
 # [Category 1]
 #   |__FileHashDupLabel
@@ -72,9 +58,6 @@ META_TAGS_TO_COLS: dict[str, ColumnFilter] = {
 #      |__EarliestYear
 #         |__Category Specific Dim
 
-
-TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
-
 @dataclass
 class Config:
     register: Cache
@@ -82,9 +65,8 @@ class Config:
     ref: pd.DataFrame
     exif: Exif
     csv_writer: CSVWriter
-    geocoder: RGeocoder
-    parser: DateParser
     dir_schema: dict[str: list[tuple[str, bool]]]
+    dims_calculator: dict[str, Callable]
 
 @dataclass
 class DirLoc:
@@ -254,12 +236,12 @@ def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: 
 
 def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
     dirs_to_del = defaultdict(set)
-    for row_id, row in dirs_df.iterrows():
-        relpath = os.path.relpath(row[Cols.FILE_DIR_PATH], row[Cols.ROOT])
+    for _, row in dirs_df.iterrows():
+        relpath = os.path.relpath(row[ColNames.FILE_DIR_PATH], row[ColNames.ROOT])
         if relpath != '.':
             dir_parts = relpath.split(os.sep)
             for level in range(len(dir_parts)): # ensure consistent naming
-                dir_to_del = os.path.join(row[Cols.ROOT], os.sep.join(dir_parts[:level+1]))
+                dir_to_del = os.path.join(row[ColNames.ROOT], os.sep.join(dir_parts[:level+1]))
                 dirs_to_del[level+1].add(dir_to_del)
     return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
 
@@ -269,7 +251,7 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
 
     # Execute operation
     tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
-    files_df[op_name] = files_df.progress_apply(lambda row: operation(row[Cols.FILE_PATH], row[Cols.dest(Cols.FILE_PATH)]), axis=1)
+    files_df[op_name] = files_df.progress_apply(lambda row: operation(row[ColNames.FILE_PATH], row[dest(ColNames.FILE_PATH)]), axis=1)
     files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"]).run(files_df)
     files_df = add_file_id(prefix="Dest").run(files_df)
 
@@ -282,7 +264,7 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
     # Remove emptied dirs
     errors = []
     if operation is move:
-        dirs_df = files_df[[Cols.ROOT, Cols.FILE_DIR_PATH]].drop_duplicates()
+        dirs_df = files_df[[ColNames.ROOT, ColNames.FILE_DIR_PATH]].drop_duplicates()
         dirs_to_del = collect_dirs_to_delete(dirs_df)
         for dir_to_del in tqdm(dirs_to_del, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR): #--- TQDM ---
             try:
@@ -294,23 +276,23 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
 
     # Post operation cache sync
     # Identify successfully completed operation cases
-    completed = files_df.loc[files_df[operation.__name__].isna(), [Cols.FILE_ID, Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.INODE_DEV), Cols.dest(Cols.INODE)]]
+    completed = files_df.loc[files_df[operation.__name__].isna(), [ColNames.FILE_ID, dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.INODE_DEV), dest(ColNames.INODE)]]
     completed = completed.rename(
         columns = {
-            Cols.dest(Cols.FILE_PATH): Cols.FILE_PATH,
-            Cols.dest(Cols.INODE_DEV): Cols.INODE_DEV,
-            Cols.dest(Cols.INODE): Cols.INODE,
+            dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
+            dest(ColNames.INODE_DEV): ColNames.INODE_DEV,
+            dest(ColNames.INODE): ColNames.INODE,
         }
     )
     # Check file id change post operation
     # If file id changed (move to another drive, copy) clone cache record from old to new id and update entry, delete old ones if move
     # If no change (move within drive) update ffile path only
-    no_chg_id = completed.loc[completed[Cols.FILE_ID] == completed[Cols.dest(Cols.FILE_ID)]]
-    no_chg_id = no_chg_id[[Cols.FILE_ID, Cols.FILE_PATH]].set_index(Cols.FILE_ID)
+    no_chg_id = completed.loc[completed[ColNames.FILE_ID] == completed[dest(ColNames.FILE_ID)]]
+    no_chg_id = no_chg_id[[ColNames.FILE_ID, ColNames.FILE_PATH]].set_index(ColNames.FILE_ID)
 
-    chg_id = completed.loc[completed[Cols.FILE_ID] != completed[Cols.dest(Cols.FILE_ID)]]
-    src_to_dest = dict(zip(chg_id[Cols.FILE_ID], chg_id[Cols.dest(Cols.FILE_ID)]))
-    chg_id = chg_id[[Cols.dest(Cols.FILE_ID), Cols.FILE_PATH, Cols.INODE_DEV, Cols.INODE]].set_index(Cols.dest(Cols.FILE_ID))
+    chg_id = completed.loc[completed[ColNames.FILE_ID] != completed[dest(ColNames.FILE_ID)]]
+    src_to_dest = dict(zip(chg_id[ColNames.FILE_ID], chg_id[dest(ColNames.FILE_ID)]))
+    chg_id = chg_id[[dest(ColNames.FILE_ID), ColNames.FILE_PATH, ColNames.INODE_DEV, ColNames.INODE]].set_index(dest(ColNames.FILE_ID))
 
     # Update cache
     for cache in (register, metadata):
@@ -335,6 +317,7 @@ def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
 def load_json(path: str):
     with open(path, 'r') as f:
         return json.load(f)
+
 ###############################
 ####### MAIN FUNCTIONS ########
 ###############################
@@ -369,13 +352,13 @@ def restore(
     files_df = pd.read_csv(report_path)
     if files_df.empty:
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
-    files_df = files_df[[Cols.dest(Cols.ROOT), Cols.dest(Cols.FILE_ID), Cols.dest(Cols.FILE_PATH), Cols.dest(Cols.FILE_DIR_PATH), Cols.FILE_PATH]]
+    files_df = files_df[[dest(ColNames.ROOT),dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.FILE_DIR_PATH), ColNames.FILE_PATH]]
     files_df = files_df.rename(columns={
-        Cols.dest(Cols.ROOT): Cols.ROOT,
-        Cols.dest(Cols.FILE_ID): Cols.FILE_ID,
-        Cols.dest(Cols.FILE_DIR_PATH): Cols.FILE_DIR_PATH,
-        Cols.dest(Cols.FILE_PATH): Cols.FILE_PATH,
-        Cols.FILE_PATH: Cols.dest(Cols.FILE_PATH)
+        dest(ColNames.ROOT): ColNames.ROOT,
+        dest(ColNames.FILE_ID): ColNames.FILE_ID,
+        dest(ColNames.FILE_DIR_PATH): ColNames.FILE_DIR_PATH,
+        dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
+        ColNames.FILE_PATH: dest(ColNames.FILE_PATH)
     })
     files_df = execute_operation(files_df, operation, register, metadata)
 
@@ -397,7 +380,6 @@ def organise(
         operation: Callable,
         config: Config,
         file_categories: list[Category] = None,
-        # dir_schema: dict[str, list[str]] = None,
         clear_cache: bool = False,
     ) -> pd.DataFrame:
 
@@ -426,8 +408,6 @@ def organise(
 
     # Load services
     exif = config.exif
-    geocoder = config.geocoder
-    date_parser = config.parser
 
     # Load ref, dir_schema
     dir_schema = config.dir_schema
@@ -452,39 +432,38 @@ def organise(
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     # Pre-processing
-    files_df = pd.DataFrame(file_records, columns=[Cols.ROOT, Cols.ROOT_PROCESSING_DEPTH, Cols.FILE_DIR_PATH, Cols.FILE_DIR_DEPTH, Cols.FILE_NAME])
+    files_df = pd.DataFrame(file_records, columns=[ColNames.ROOT, ColNames.ROOT_PROCESSING_DEPTH, ColNames.FILE_DIR_PATH, ColNames.FILE_DIR_DEPTH, ColNames.FILE_NAME])
 
     #--- Notification ---
     print("\nFiles found")
-    for root in files_df[Cols.ROOT].unique():
-        print(Notifications.ELEMENTS["root_stat"].build(indent=1, dir_path=root, n=len(files_df.loc[files_df[Cols.ROOT] == root])))
+    for root in files_df[ColNames.ROOT].unique():
+        print(Notifications.ELEMENTS["root_stat"].build(indent=1, dir_path=root, n=len(files_df.loc[files_df[ColNames.ROOT] == root])))
     #--- Notification ---
 
-    files_df[Cols.EXIF_ARGS] = "".join(EXIFTOOL_ARGS)
-    files_df[Cols.dest(Cols.ROOT)] = dest_root
+    files_df[ColNames.EXIF_ARGS] = "".join(EXIFTOOL_ARGS)
+    files_df[dest(ColNames.ROOT)] = dest_root
     files_df = assemble_file_path(prefix="").run(files_df)
     files_df = add_stat(prefix="", metrics=["st_size", "st_mtime", "st_dev", "st_ino"]).run(files_df)
     files_df = add_file_id(prefix="").run(files_df)
-    reg_cols = NameFilter([Cols.FILE_PATH, Cols.FILE_NAME, Cols.INODE_DEV, Cols.INODE, Cols.MODIFIED_AT, Cols.SIZE, Cols.EXIF_ARGS]).select(files_df.columns)
 
     # Check if there is enough space to process files
     if operation is copy or (operation is move and is_cross_drive):
-        required = files_df[Cols.SIZE].sum()
+        required = files_df[ColNames.SIZE].sum()
         _, _, free = shutil.disk_usage(dest_root)
         if required >= free:
             required_gb = bytes_converter(required, "GB")
             free_gb = bytes_converter(free, "GB")
             raise RuntimeError(Errors.ELEMENTS["low_disk_space"].build(op=op_name, required=required_gb, free=free_gb)) #--- Error ---
 
-    new_files_df = files_df[~files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
-    known_files_df = files_df[files_df[Cols.FILE_ID].isin(register.data.index)].set_index(Cols.FILE_ID)
+    new_files_df = files_df[~files_df[ColNames.FILE_ID].isin(register.data.index)].set_index(ColNames.FILE_ID)
+    known_files_df = files_df[files_df[ColNames.FILE_ID].isin(register.data.index)].set_index(ColNames.FILE_ID)
 
     # Identify changed files
     changed_files_df = pd.DataFrame()
     if not known_files_df.empty:
-        date_change = register.data.loc[known_files_df.index, Cols.MODIFIED_AT] != known_files_df[Cols.MODIFIED_AT] # risky check for float type
-        size_change = register.data.loc[known_files_df.index, Cols.SIZE] != known_files_df[Cols.SIZE]
-        args_change = register.data.loc[known_files_df.index, Cols.EXIF_ARGS] != known_files_df[Cols.EXIF_ARGS]
+        date_change = register.data.loc[known_files_df.index, ColNames.MODIFIED_AT] != known_files_df[ColNames.MODIFIED_AT] # risky check for float type
+        size_change = register.data.loc[known_files_df.index, ColNames.SIZE] != known_files_df[ColNames.SIZE]
+        args_change = register.data.loc[known_files_df.index, ColNames.EXIF_ARGS] != known_files_df[ColNames.EXIF_ARGS]
         changed_files_df = known_files_df.loc[date_change | size_change | args_change]
 
     print("\nFiles processing")
@@ -493,87 +472,65 @@ def organise(
     print(Notifications.ELEMENTS["cache_load"].build(indent=1, n=n_loaded, n_total=n_total, share=n_loaded/n_total))#--- Notification ---
 
     # Extract exif metadata
-    to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[Cols.FILE_PATH, Cols.FILE_ID, Cols.INODE_DEV, Cols.INODE]]
+    to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[ColNames.FILE_PATH, ColNames.FILE_ID, ColNames.INODE_DEV, ColNames.INODE]]
     if not to_exif_df.empty:
-        files_to_exif = to_exif_df[Cols.FILE_PATH].to_list()
+        files_to_exif = to_exif_df[ColNames.FILE_PATH].to_list()
         n_files = len(files_to_exif)
         exif_results = list(tqdm(exif.extract(files_to_exif, args=EXIFTOOL_ARGS), total=n_files, desc=TQDMDesc.ELEMENTS["extract"].build(indent=1), bar_format=TQDM_BAR)) #------- TQDM ------
         exif_df = pd.DataFrame(exif_results)
         exif_df["SourceFile"] = exif_df["SourceFile"].apply(os.path.normpath)
-        exif_df = exif_df.merge(to_exif_df, how="left", left_on="SourceFile", right_on=Cols.FILE_PATH)
+        exif_df = exif_df.merge(to_exif_df, how="left", left_on="SourceFile", right_on=ColNames.FILE_PATH)
         exif_df = exif_df.drop(columns="SourceFile")
-        exif_df = exif_df.set_index(Cols.FILE_ID)
+        exif_df = exif_df.set_index(ColNames.FILE_ID)
 
     # Update cache
     if not changed_files_df.empty:
-        register.update(changed_files_df[reg_cols].convert_dtypes()) # ensure dtype alignment
+        register.update(changed_files_df[registry_cols.select(changed_files_df.columns)].convert_dtypes()) # ensure dtype alignment
         metadata.update(exif_df.loc[exif_df.index.isin(changed_files_df.index)].convert_dtypes()) # ensure dtype alignment
 
     if not new_files_df.empty:
-        register.add(new_files_df[reg_cols])
+        register.add(new_files_df[registry_cols.select(new_files_df.columns)])
         metadata.add(exif_df.loc[exif_df.index.isin(new_files_df.index)])
 
     # Select metadata
-    metadata_df = metadata.data[metadata.data.index.isin(files_df[Cols.FILE_ID])]
-    date_cols = [col for date_tag in META_DATE_TAGS for col in META_TAGS_TO_COLS[date_tag].select(metadata_df.columns)]
-    dims_cols = NameFilter([Cols.FILE_TYPE_EXT, Cols.EXIF_MODEL, Cols.EXIF_GPS_LATITUDE, Cols.EXIF_GPS_LONGITUDE, Cols.XML_HEADING_PAIRS]).select(metadata_df.columns)
-    metadata_df = metadata_df[date_cols + dims_cols]
+    metadata_df = metadata.data[metadata.data.index.isin(files_df[ColNames.FILE_ID])]
+    metadata_df = metadata_df[metadata_cols.select(metadata_df.columns)]
 
     # Enrich files with exif metadata
-    files_df = files_df.merge(metadata_df, how="left", left_on=Cols.FILE_ID, right_index=True)
+    files_df = files_df.merge(metadata_df, how="left", left_on=ColNames.FILE_ID, right_index=True)
     files_df = consolidate_file_ext().run(files_df)
 
     # Get categories from ref
-    files_df = files_df.merge(config.ref[[Cols.FILE_EXT, Cols.FILE_CATEGORY]], how="left", left_on=Cols.CONSOLIDATED_EXT, right_on=Cols.FILE_EXT)
-    files_df[Cols.FILE_CATEGORY] = files_df[Cols.FILE_CATEGORY].fillna("Other")
+    files_df = files_df.merge(config.ref[[ColNames.FILE_EXT, ColNames.FILE_CATEGORY]], how="left", left_on=ColNames.CONSOLIDATED_EXT, right_on=ColNames.FILE_EXT)
+    files_df[ColNames.FILE_CATEGORY] = files_df[ColNames.FILE_CATEGORY].fillna("Other")
 
     # Filter file category
     if file_categories:
-        files_df = FilterRows(Condition(Cols.FILE_CATEGORY, "isin", file_categories)).run(files_df)
+        files_df = FilterRows(Condition(ColNames.FILE_CATEGORY, "isin", file_categories)).run(files_df)
         n_filtered = n_total - len(files_df)
         print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=n_filtered/n_total)) #--- Notification ---
         if files_df.empty:
             raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     # Resolve dest dir schema
-    dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser)
-    for cat in files_df[Cols.FILE_CATEGORY].unique():
-        common_prefix = os.path.join(dest_root, cat)
-        if dir_schema:
-            enabled_dims = [dir_dim for dir_dim, enabled in dir_schema.get(cat, dir_schema["Default"]) if enabled]
-            for dim in enabled_dims:
-                if dim in files_df.columns:
-                    continue
-                elif dim in dims_calc:
-                    files_df = dims_calc[dim].run(files_df)
-                else:
-                    raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=dims_calc.keys())) #--- Error ---
-            # Asemble dest dir per category
-            files_df = assemble_dest_dir(common_prefix, file_category=cat, dims=enabled_dims).run(files_df)
+    unique_categories = files_df[ColNames.FILE_CATEGORY].unique()
+    dispatched_dir_schema = {cat: [dim for dim, enabled in dir_schema.get(cat, dir_schema["Default"]) if enabled] for cat in unique_categories}
+    unique_dims = set(sum(dispatched_dir_schema.values(), []))
+    
+    for dim in unique_dims:
+        if dim in files_df.columns:
+            continue
+        elif dim not in config.dims_calculator:
+            print(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=config.dims_calculator.keys()))
+            continue
+        files_df = config.dims_calculator[dim].run(files_df)
+    
+    for cat, dims in dispatched_dir_schema.items():
+        requested_dims = [ColNames.ROOT, ColNames.FILE_CATEGORY] + dims if dims else []
+        if dims:
+            files_df = assemble_dest_dir(requested_dims, cat).run(files_df)
         else:
-            # Everything goes to root dir
-            files_df = assemble_dest_dir(common_prefix).run(files_df)
-        
-        # dispatched_dir_schema = {cat: [dim for dim, enabled in dir_schema.get(cat, dir_schema["Default"]) if enabled] for cat in files_df[Cols.FILE_CATEGORY].unique()}
-        # resolved_dir_schema = {cat: [dim for dim, enabled in dims if enabled] for cat, dims in dir_schema.items() if cat == "Universal" or cat in files_df[Cols.FILE_CATEGORY].unique()}
-        # dims_per_category = {cat: resolved_dir_schema["Universal"] + resolved_dir_schema.get(cat, []) for cat in files_df[Cols.FILE_CATEGORY].unique()}
-        # Calculate dims features
-        # dims_calc = prepare_dimensions_calc(geocoder, date_cols, date_parser)
-        # for dims in dispatched_dir_schema.values():
-            # for dim in dims:
-                # if dim in files_df.columns:
-                    # continue
-                # elif dim in dims_calc:
-                    # files_df = dims_calc[dim].run(files_df)
-                # else:
-                    # raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=dims_calc.keys())) #--- Error ---
-        # Asemble dest dir per category
-        # for cat, dims in dispatched_dir_schema.items():
-            # common_prefix = os.path.join(dest_root, cat)
-            # files_df = assemble_dest_dir(common_prefix, file_category=cat, dims=dims).run(files_df)
-    # else:
-        # Everything goes to root dir
-        # files_df = assemble_dest_dir(common_prefix).run(files_df)
+            files_df = assemble_dest_dir(requested_dims, cat).run(files_df)
 
     # Assemble dest file path
     files_df = assemble_file_path(prefix="Dest").run(files_df)
@@ -621,9 +578,8 @@ def main():
         ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"), # review  encoding issue
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
         csv_writer=CSVWriter(encoding="utf-8-sig"),
-        geocoder=RGeocoder(mode=1, verbose=False),
-        parser=DateParser(),
-        dir_schema=load_json(DIR_SCHEMA_PATH)
+        dir_schema=load_json(DIR_SCHEMA_PATH),
+        dims_calculator=build_dims_calculator(geocoder=RGeocoder(mode=1, verbose=False), date_parser=DateParser(), date_col_filter=date_cols)
     )
 
     category_selection = CategorySelection().get()
@@ -636,7 +592,6 @@ def main():
             operation=move,
             config=config,
             file_categories=category_selection,
-            # dir_schema=DIR_SCHEMA,
             clear_cache=False,
         )
 

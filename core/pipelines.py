@@ -1,17 +1,18 @@
+from core.col_names import ColNames, dest, dup, label, add_prefix
 from core.parser import DateParser
-from dataframe.pipeline import Pipeline, FilterRows, Compute, Label, ExpandDict
-from dataframe.col_filter import NameFilter
+from dataframe.pipeline import Pipeline, Compute, Label, ExpandDict
+from dataframe.col_filter import ColumnFilter, NameFilter
 from dataframe.processor import ElementProcessor, RowProcessor, ColProcessor
-from dataframe.predicate import Predicate, Condition, And, Or, AllRows
+from dataframe.predicate import Condition, AllRows
 import datetime as dt
 import pandas as pd
 from utils.path import parse_filename
 from utils.text import uppercase_text
 import os
 import hashlib
-from constants import Cols
 from typing import Literal
 from reverse_geocoder import RGeocoder
+
 
 ###############################
 ########### HELPERS ###########
@@ -20,10 +21,10 @@ from reverse_geocoder import RGeocoder
 def safe_stat(file_path: str, metrics: list[str], prefix: str) -> os.stat_result | None:
 
     stat_cols = {
-        "st_size": Cols.prefix(Cols.SIZE, prefix),
-        "st_mtime": Cols.prefix(Cols.MODIFIED_AT, prefix),
-        "st_dev": Cols.prefix(Cols.INODE_DEV, prefix),
-        "st_ino": Cols.prefix(Cols.INODE, prefix),
+        "st_size": add_prefix(ColNames.SIZE, prefix),
+        "st_mtime": add_prefix(ColNames.MODIFIED_AT, prefix),
+        "st_dev": add_prefix(ColNames.INODE_DEV, prefix),
+        "st_ino": add_prefix(ColNames.INODE, prefix),
     }
 
     if os.path.isfile(file_path):
@@ -43,29 +44,26 @@ def build_unique_filename(filename: str, ino: int) -> str:
     return f"{stem}_{str(ino)}.{ext}"
 
 def build_file_path(row: pd.Series) -> str:
-    dir_path = next(row[col] for col in row.index if Cols.FILE_DIR_PATH in col)
-    filename = build_unique_filename(row[Cols.FILE_NAME], row[Cols.INODE]) if row.get(Cols.dup(Cols.FILE_NAME), False) else row[Cols.FILE_NAME]
+    dir_path = next(row[col] for col in row.index if ColNames.FILE_DIR_PATH in col)
+    filename = build_unique_filename(row[ColNames.FILE_NAME], row[ColNames.INODE]) if row.get(dup(ColNames.FILE_NAME), False) else row[ColNames.FILE_NAME]
     return os.path.join(dir_path, filename)
 
-def build_dir_path(row: pd.Series, root: str, dims: list[str] = None) -> str:
-    if dims:
-        parts = [str(row[dim]) for dim in dims if pd.notna(row[dim])]
-        return os.path.join(root, *parts)
-    return root
+def build_dir_path(row: pd.Series) -> str:
+    return os.sep.join([str(value) for value in row.values if pd.notna(value)])
 
 def resolve_ext(row: pd.Series) -> str:
-    _, ext = parse_filename(row[Cols.FILE_NAME])
-    exif_ext = row[Cols.FILE_TYPE_EXT]
+    _, ext = parse_filename(row[ColNames.FILE_NAME])
+    exif_ext = row[ColNames.FILE_TYPE_EXT]
     return uppercase_text(ext) if pd.isna(exif_ext) else exif_ext
 
 def get_id(row: pd.Series, prefix: str) -> str:
-    dev = row[Cols.prefix(Cols.INODE_DEV, prefix)]
-    ino = row[Cols.prefix(Cols.INODE, prefix)]
+    dev = row[add_prefix(ColNames.INODE_DEV, prefix)]
+    ino = row[add_prefix(ColNames.INODE, prefix)]
     return hashlib.md5(f"{dev}|{ino}".encode()).hexdigest()
 
-def get_country(row: pd.Series, geocoder: RGeocoder) -> str:
-    lat = row[Cols.EXIF_GPS_LATITUDE]
-    lon = row[Cols.EXIF_GPS_LONGITUDE]
+def get_country(row: pd.Series, geocoder: RGeocoder) -> str | None:
+    lat = row[ColNames.EXIF_GPS_LATITUDE]
+    lon = row[ColNames.EXIF_GPS_LONGITUDE]
     
     if pd.isna(lat) or pd.isna(lon):
         return None
@@ -123,116 +121,121 @@ def calc_full_hash(path: str, hash_algo: str = "md5", buf_size: int = 65536) -> 
 #### DF PIPELINE FUNCTIONS ####
 ###############################
 
-def assemble_file_path(prefix: Literal["", "Dest"]):
-
-    file_dir_path = Cols.dest(Cols.FILE_DIR_PATH) if prefix else Cols.FILE_DIR_PATH
-    file_path = Cols.dest(Cols.FILE_PATH) if prefix else Cols.FILE_PATH
-
+def assemble_file_path(prefix: Literal['', "Dest"]):
     if prefix:
         return Pipeline(
             [
                 Compute(
-                    ColProcessor(duplicated_ci, keep="first"), NameFilter(Cols.FILE_NAME),
-                    dest_col=Cols.dup(Cols.FILE_NAME)
+                    ColProcessor(duplicated_ci, keep="first"), NameFilter(ColNames.FILE_NAME),
+                    dest_col=dup(ColNames.FILE_NAME)
                 ),
                 Compute(
-                    RowProcessor(build_file_path), NameFilter([file_dir_path, Cols.FILE_NAME, Cols.dup(Cols.FILE_NAME), Cols.INODE]),
-                    dest_col=file_path
+                    RowProcessor(build_file_path), NameFilter([add_prefix(ColNames.FILE_DIR_PATH, prefix), ColNames.FILE_NAME, dup(ColNames.FILE_NAME), ColNames.INODE]),
+                    dest_col=add_prefix(ColNames.FILE_PATH, prefix)
                 ),
             ]
         )
+    
     return Pipeline(
         [
             Compute(
-                RowProcessor(build_file_path), NameFilter([file_dir_path, Cols.FILE_NAME]),
-                dest_col=file_path
+                RowProcessor(build_file_path), NameFilter([add_prefix(ColNames.FILE_DIR_PATH, prefix), ColNames.FILE_NAME]),
+                dest_col=add_prefix(ColNames.FILE_PATH, prefix)
             )
         ]
     )
 
-def add_stat(prefix: Literal["", "Dest"], metrics: Literal["st_size", "st_mtime", "st_dev", "st_ino"]):
+def add_stat(prefix: Literal['', "Dest"], metrics: Literal["st_size", "st_mtime", "st_dev", "st_ino"]):
     return Pipeline(
         [
             Compute(
-                ElementProcessor(safe_stat, metrics=metrics, prefix=prefix), NameFilter(Cols.prefix(Cols.FILE_PATH, prefix)),
-                dest_col=Cols.prefix(Cols.FILE_STAT, prefix)
+                ElementProcessor(safe_stat, metrics=metrics, prefix=prefix), NameFilter(add_prefix(ColNames.FILE_PATH, prefix)),
+                dest_col=add_prefix(ColNames.FILE_STAT, prefix)
             ),
             ExpandDict(
-                col=Cols.prefix(Cols.FILE_STAT, prefix),
-                where=Condition(Cols.prefix(Cols.FILE_STAT, prefix), "notna")
+                col=add_prefix(ColNames.FILE_STAT, prefix),
+                where=Condition(add_prefix(ColNames.FILE_STAT, prefix), "notna")
             )
         ]
     )
 
-def add_file_id(prefix: Literal["", "Dest"]):
+def add_file_id(prefix: Literal['', "Dest"]):
     return Compute(
-        RowProcessor(get_id, prefix=prefix), NameFilter([Cols.prefix(Cols.INODE_DEV, prefix), Cols.prefix(Cols.INODE, prefix)]),
-        dest_col=Cols.prefix(Cols.FILE_ID, prefix)
+        RowProcessor(get_id, prefix=prefix), NameFilter([add_prefix(ColNames.INODE_DEV, prefix), add_prefix(ColNames.INODE, prefix)]),
+        dest_col=add_prefix(ColNames.FILE_ID, prefix)
     )
 
 def consolidate_file_ext():
     return Compute(
-        RowProcessor(resolve_ext), NameFilter([Cols.FILE_TYPE_EXT, Cols.FILE_NAME]),
-        dest_col=Cols.CONSOLIDATED_EXT
+        RowProcessor(resolve_ext), NameFilter([ColNames.FILE_TYPE_EXT, ColNames.FILE_NAME]),
+        dest_col=ColNames.CONSOLIDATED_EXT
     )
 
-def prepare_dimensions_calc(geocoder: RGeocoder, date_cols: list[str], date_parser: DateParser):
+def build_dims_calculator(geocoder: RGeocoder, date_parser: DateParser, date_col_filter: ColumnFilter):
     return {
-        Cols.label(Cols.dup(Cols.FILE_HASH)): Pipeline(
+        label(dup(ColNames.FILE_HASH)): Pipeline(
             [
                 Compute(
-                    ColProcessor(duplicated, keep=False), NameFilter(Cols.SIZE),
-                    dest_col=Cols.dup(Cols.SIZE),
-                    where=Condition(Cols.SIZE, "notna")
+                    ColProcessor(duplicated, keep=False),
+                    col_filter=NameFilter(ColNames.SIZE),
+                    dest_col=dup(ColNames.SIZE),
+                    where=Condition(ColNames.SIZE, "notna")
                 ),
                 Compute(
-                    ElementProcessor(calc_full_hash), NameFilter(Cols.FILE_PATH),
-                    dest_col=Cols.FILE_HASH,
-                    where=Condition(Cols.dup(Cols.SIZE), "eq", True)
+                    ElementProcessor(calc_full_hash),
+                    col_filter=NameFilter(ColNames.FILE_PATH),
+                    dest_col=ColNames.FILE_HASH,
+                    where=Condition(dup(ColNames.SIZE), "eq", True)
                 ),
                 Compute(
-                    ColProcessor(duplicated, keep="first"), NameFilter(Cols.FILE_HASH),
-                    dest_col=Cols.dup(Cols.FILE_HASH),
-                    where=Condition(Cols.dup(Cols.SIZE), "eq", True)
+                    ColProcessor(duplicated, keep="first"),
+                    col_filter=NameFilter(ColNames.FILE_HASH),
+                    dest_col=dup(ColNames.FILE_HASH),
+                    where=Condition(dup(ColNames.SIZE), "eq", True)
                 ),
                 Label(
-                    dest_col=Cols.label(Cols.dup(Cols.FILE_HASH)),
+                    dest_col=label(dup(ColNames.FILE_HASH)),
                     value="dup",
-                    where=Condition(Cols.dup(Cols.FILE_HASH), "eq", True)
+                    where=Condition(dup(ColNames.FILE_HASH), "eq", True)
                 ),
                 Label(
-                    dest_col=Cols.label(Cols.dup(Cols.FILE_HASH)),
+                    dest_col=label(dup(ColNames.FILE_HASH)),
                     value="unique",
-                    where=Condition(Cols.dup(Cols.FILE_HASH), "ne", True)
+                    where=Condition(dup(ColNames.FILE_HASH), "ne", True)
                 )
             ]
         ),
-        Cols.EARLIEST_YEAR: Pipeline(
+        ColNames.EARLIEST_YEAR: Pipeline(
             [
                 Compute(
-                    ElementProcessor(date_parser.parse), NameFilter(date_cols)
+                    ElementProcessor(date_parser.parse),
+                    col_filter=date_col_filter
                 ),
                 Compute(
-                    RowProcessor(get_earliest_year), NameFilter(date_cols),
-                    dest_col=Cols.EARLIEST_YEAR
+                    RowProcessor(get_earliest_year),
+                    col_filter=date_col_filter,
+                    dest_col=ColNames.EARLIEST_YEAR
                 )
             ]
         ),
-        Cols.IMAGE_COUNTRY: Compute(
-            RowProcessor(get_country, geocoder=geocoder), NameFilter([Cols.EXIF_GPS_LATITUDE, Cols.EXIF_GPS_LONGITUDE]),
-            dest_col=Cols.IMAGE_COUNTRY,
-            where=Condition(Cols.FILE_CATEGORY, "eq", "Image")
+        ColNames.IMAGE_COUNTRY: Compute(
+            RowProcessor(get_country, geocoder=geocoder),
+            col_filter=NameFilter([ColNames.EXIF_GPS_LATITUDE, ColNames.EXIF_GPS_LONGITUDE]),
+            dest_col=ColNames.IMAGE_COUNTRY,
+            where=Condition(ColNames.FILE_CATEGORY, "eq", "Image")
         ),
-        Cols.WORKSHEETS_COUNT: Compute(
-            ElementProcessor(get_worksheets_count, target_headings=["Worksheets", "Листы"]), NameFilter(Cols.XML_HEADING_PAIRS), 
-            dest_col=Cols.WORKSHEETS_COUNT,
-            where=Condition(Cols.FILE_CATEGORY, "eq", "Data-Excel")
+        ColNames.WORKSHEETS_COUNT: Compute(
+            ElementProcessor(get_worksheets_count, target_headings=["Worksheets", "Листы"]),
+            col_filter=NameFilter(ColNames.XML_HEADING_PAIRS), 
+            dest_col=ColNames.WORKSHEETS_COUNT,
+            where=Condition(ColNames.FILE_CATEGORY, "eq", "Data-Excel")
         )
     }
 
-def assemble_dest_dir(dest_root: str, file_category: str = None, dims: list[str] = None):
+def assemble_dest_dir(dir_dims: list[str], file_category: str):
     return Compute(
-        RowProcessor(build_dir_path, root=dest_root, dims=dims),
-        dest_col=Cols.dest(Cols.FILE_DIR_PATH),
-        where=Condition(Cols.FILE_CATEGORY, "eq", file_category) if file_category else AllRows()
+        RowProcessor(build_dir_path),
+        col_filter=NameFilter(dir_dims),
+        dest_col=dest(ColNames.FILE_DIR_PATH),
+        where=Condition(ColNames.FILE_CATEGORY, "eq", file_category) if file_category else AllRows()
     )
