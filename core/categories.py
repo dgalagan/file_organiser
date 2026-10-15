@@ -1,6 +1,7 @@
-from typing import Literal, get_args
+from constants import FILE_CAT_PATH
+from typing import Literal
+from utils.json import load_json
 
-# all_categories = csv_loader.load(EXTENSION_MAP_PATH)[Cols.FILE_CATEGORY].drop_duplicates().to_list()
 Category = Literal[
     "Application", "Archive", "Audio", "Cache", "Config", "Database",
     "Data-Excel", "Data-PowerPoint", "Data-PowerBI", "Data-Other",
@@ -10,7 +11,7 @@ Category = Literal[
 
 class CategorySelection:
     def __init__(self):
-        self._state = {c: True for c in get_args(Category)}
+        self._state = load_json(FILE_CAT_PATH)
     # ui
     def toggle(self, category: str):
         self._state[category] = not self._state[category]

@@ -171,7 +171,7 @@ def consolidate_file_ext():
         dest_col=ColNames.CONSOLIDATED_EXT
     )
 
-def build_dims_calculator(geocoder: RGeocoder, date_parser: DateParser, date_col_filter: ColumnFilter):
+def build_dims_map(geocoder: RGeocoder, date_parser: DateParser, date_col_filter: ColumnFilter) -> dict[str, Pipeline | Compute]:
     return {
         label(dup(ColNames.FILE_HASH)): Pipeline(
             [

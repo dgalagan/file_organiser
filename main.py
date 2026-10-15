@@ -9,14 +9,13 @@ from core.col_filter_presets import registry_cols, metadata_cols, date_cols
 from core.parser import DateParser
 from core.exif import Exif
 from core.categories import Category, CategorySelection
-from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, build_dims_calculator, assemble_dest_dir
+from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, build_dims_map, assemble_dest_dir
 from dataclasses import dataclass
-from dataframe.pipeline import FilterRows
+from dataframe.pipeline import Pipeline, Compute, FilterRows
 from dataframe.predicate import Condition
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
 from datetime import datetime
-import json
 import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
@@ -24,11 +23,14 @@ import shutil
 from tqdm import tqdm
 from typing import Callable, Literal
 from utils.path import get_drive, iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
+from utils.json import load_json
 from collections import defaultdict
 
 ###############################
 ############ TO-DO ############
 ###############################
+
+# src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
 
 # [info] with shutil.copy2 atime and ctime updated, mtime preserved
 # [info] CacheKey blends inodedev, inode
@@ -48,6 +50,7 @@ EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
 EXIFTOOL_ENCODING = "utf-8"
 EXIFTOOL_BATCH_SIZE = 50
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
+OP_DICT = {"copy": copy, "move": move}
 
 # [Category 1]
 #   |__FileHashDupLabel
@@ -65,8 +68,8 @@ class Config:
     ref: pd.DataFrame
     exif: Exif
     csv_writer: CSVWriter
-    dir_schema: dict[str: list[tuple[str, bool]]]
-    dims_calculator: dict[str, Callable]
+    dir_schema: dict[str, list[tuple[str, bool]]]
+    schema_dims_map: dict[str, Pipeline | Compute]
 
 @dataclass
 class DirLoc:
@@ -79,12 +82,9 @@ class DirProcessingConfig:
     target_depth: int # level to which the dir is traversed (0 = dir only)
 
 class MenuActions(StrEnum):
-    EXIT = auto()
-    INTERRUPT = auto()
     SKIP = auto()
     SUCCESS = auto()
-    FAILED = auto()
-    RESTART = auto()
+    INTERRUPT = auto()
 
 ###############################
 ########### HELPERS ###########
@@ -314,10 +314,6 @@ def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
         case "GB": return int(n_bytes / 1024 ** 3)
         case "TB": return int(n_bytes / 1024 ** 4)
 
-def load_json(path: str):
-    with open(path, 'r') as f:
-        return json.load(f)
-
 ###############################
 ####### MAIN FUNCTIONS ########
 ###############################
@@ -362,15 +358,16 @@ def restore(
     })
     files_df = execute_operation(files_df, operation, register, metadata)
 
+    # Save cache
+    register.save(dropna=False)
+    metadata.save(dropna=True)
+
     # Save summary
     files_df = files_df.dropna(axis="columns", how="all")
     datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
     summary_path = os.path.join(OUTPUT_DIR_PATH, f"restore_{datestamp}.csv")
     config.csv_writer.save(files_df, summary_path)
     print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
-    # Save cache
-    register.save(dropna=False)
-    metadata.save(dropna=True)
 
     return files_df
 
@@ -379,9 +376,11 @@ def organise(
         dest_root: str,
         operation: Callable,
         config: Config,
-        file_categories: list[Category] = None,
+        file_categories: list[str] = None,
         clear_cache: bool = False,
     ) -> pd.DataFrame:
+
+    # implement category consistency check
 
     op_name = operation.__name__
     is_cross_drive = {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
@@ -520,10 +519,10 @@ def organise(
     for dim in unique_dims:
         if dim in files_df.columns:
             continue
-        elif dim not in config.dims_calculator:
-            print(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=config.dims_calculator.keys()))
+        elif dim not in config.schema_dims_map:
+            print(Errors.ELEMENTS["unknown_value"].build(received=dim, expected=config.schema_dims_map.keys()))
             continue
-        files_df = config.dims_calculator[dim].run(files_df)
+        files_df = config.schema_dims_map[dim].run(files_df)
     
     for cat, dims in dispatched_dir_schema.items():
         requested_dims = [ColNames.ROOT, ColNames.FILE_CATEGORY] + dims if dims else []
@@ -538,36 +537,37 @@ def organise(
     # Execute operation
     files_df = execute_operation(files_df, operation, register, metadata)
 
+    # Save cache
+    register.save(dropna=False)
+    metadata.save(dropna=True)
+
     # Save summary
     files_df = files_df.dropna(axis="columns", how="all")
     datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
     summary_path = os.path.join(OUTPUT_DIR_PATH, f"organise_{datestamp}.csv")
     config.csv_writer.save(files_df, summary_path)
     print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
-    # Save cache
-    register.save(dropna=False)
-    metadata.save(dropna=True)
 
     return files_df
 
 def main():
     parser = argparse.ArgumentParser(description="File organiser")
-    parser.add_argument("action", choices=["organise", "restore"])
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Select mode")
+
+    # organise command
+    org = subparsers.add_parser("organise")
+    org.add_argument("--src", nargs="+", required=True, help="Source directories")
+    org.add_argument("--dest", required=True, help="Destination directory")
+    org.add_argument("--op", choices=["move", "copy"], default="copy")
+    org.add_argument("--cat", choices=[Category], default=None, help="Select file category")
+    org.add_argument("--clear", action="store_true", help="Clear cache tables")
+
+    # restore command
+    res = subparsers.add_parser("restore")
+    res.add_argument("--report", required=True, help="Data for restore")
+    res.add_argument("--op", choices=["move", "copy"], default="copy")
+
     args = parser.parse_args()
-
-    # subparsers = parser.add_subparsers(dest="action", required=True)
-    # org = subparsers.add_parser("organise")
-    # res = subparsers.add_parser("restore")
-
-    # # organise command
-    # org.add_argument("--src", nargs="+", required=True, help="source root(s)")
-    # org.add_argument("--dest", required=True, help="destination root")
-    # org.add_argument("--operation", choices=["copy", "move"], default="copy")
-    # org.add_argument("--clear-cache", action="store_true")
-
-    # # restore command
-    # res.add_argument("--report", required=True, help="report file name")
-    # res.add_argument("--operation", choices=["copy", "move"], default="move")
 
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)
@@ -579,30 +579,27 @@ def main():
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
         csv_writer=CSVWriter(encoding="utf-8-sig"),
         dir_schema=load_json(DIR_SCHEMA_PATH),
-        dims_calculator=build_dims_calculator(geocoder=RGeocoder(mode=1, verbose=False), date_parser=DateParser(), date_col_filter=date_cols)
+        schema_dims_map=build_dims_map(geocoder=RGeocoder(mode=1, verbose=False), date_parser=DateParser(), date_col_filter=date_cols)
     )
 
-    category_selection = CategorySelection().get()
-
-    if args.action == "organise":
+    if args.command == "organise":
        organise(
-            # src_roots=["D:\\HDD Data\\Ciklum", "D:\\OneDrive", "D:\\HDD Data", "D:\\OneDrive\\Desktop\\Books", "D:\\HDD Data\\Ciklum\\Adidas", "D:\\HDD Data\\CurriculumVitae", "D:\\HDD Data\\OTHER", "D:\\HDD Data\\OTHER\\Flashka 2\\ТПК2\\Презентации\\Рассылка на КОК"],
-            src_roots=["D:\\MyOrganizedFiles"],
-            dest_root="D:\\MyOrganizedFiles",
-            operation=move,
+            src_roots=args.src,
+            dest_root=args.dest,
+            operation=OP_DICT.get(args.op),
             config=config,
-            file_categories=category_selection,
-            clear_cache=False,
+            file_categories=args.cat,
+            clear_cache=args.clear,
         )
 
-    elif args.action == "restore":
+    elif args.command == "restore":
         restore(
-            report_name="organise_20260916T145535.csv",
-            operation=move,
+            report_name=args.report,
+            operation=OP_DICT.get(args.op),
             config=config
         )
     else:
-        print(args.action)
+        print(args.command)
 
 if __name__ == "__main__":
     main()

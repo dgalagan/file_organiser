@@ -24,6 +24,10 @@ REGISTER_PATH = os.path.join(CACHE_DIR_PATH, CACHE_REGISTER)
 DIR_SCHEMA = "dir_schema.json"
 DIR_SCHEMA_PATH = os.path.join(PROJECT_ROOT, DIR_SCHEMA)
 
+# --- File Categories ---
+FILE_CAT = "file_categories.json"
+FILE_CAT_PATH = os.path.join(PROJECT_ROOT, FILE_CAT)
+
 # --- Output ---
 OUTPUT_DIR = "output"
 OUTPUT_DIR_PATH = os.path.join(PROJECT_ROOT, OUTPUT_DIR)
