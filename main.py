@@ -50,7 +50,7 @@ EXIFTOOL_ARGS = ["-j", "-G", "-all", "--File:Directory"]
 EXIFTOOL_ENCODING = "utf-8"
 EXIFTOOL_BATCH_SIZE = 50
 TQDM_BAR = '{l_bar}{bar:60}{r_bar}{bar:-10b}'
-OP_DICT = {"copy": copy, "move": move}
+OPERATIONS = {"copy": copy, "move": move}
 
 # [Category 1]
 #   |__FileHashDupLabel
@@ -245,13 +245,11 @@ def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
                 dirs_to_del[level+1].add(dir_to_del)
     return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
 
-def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cache, metadata: Cache):
-
-    op_name = operation.__name__
+def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register: Cache, metadata: Cache):
 
     # Execute operation
     tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
-    files_df[op_name] = files_df.progress_apply(lambda row: operation(row[ColNames.FILE_PATH], row[dest(ColNames.FILE_PATH)]), axis=1)
+    files_df[op_name] = files_df.progress_apply(lambda row: op_func(row[ColNames.FILE_PATH], row[dest(ColNames.FILE_PATH)]), axis=1)
     files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"]).run(files_df)
     files_df = add_file_id(prefix="Dest").run(files_df)
 
@@ -263,7 +261,7 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
 
     # Remove emptied dirs
     errors = []
-    if operation is move:
+    if op_name == "move":
         dirs_df = files_df[[ColNames.ROOT, ColNames.FILE_DIR_PATH]].drop_duplicates()
         dirs_to_del = collect_dirs_to_delete(dirs_df)
         for dir_to_del in tqdm(dirs_to_del, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR): #--- TQDM ---
@@ -276,7 +274,7 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
 
     # Post operation cache sync
     # Identify successfully completed operation cases
-    completed = files_df.loc[files_df[operation.__name__].isna(), [ColNames.FILE_ID, dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.INODE_DEV), dest(ColNames.INODE)]]
+    completed = files_df.loc[files_df[op_name].isna(), [ColNames.FILE_ID, dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.INODE_DEV), dest(ColNames.INODE)]]
     completed = completed.rename(
         columns = {
             dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
@@ -301,12 +299,20 @@ def execute_operation(files_df: pd.DataFrame, operation: Callable, register: Cac
         if not chg_id.empty:
             cache.clone(src_to_dest)
             cache.update(chg_id.convert_dtypes()) # ensure dtype alignment
-            if operation is move:
+            if op_name == "move":
                 # drop stale cache entries
                 stale_ids = list(src_to_dest.keys())
                 cache.delete(stale_ids)
 
     return files_df
+
+def save_op_report(files_df: pd.DataFrame, csv_writer: CSVWriter) -> None:
+    files_df = files_df.dropna(axis="columns", how="all")
+    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
+    summary_path = os.path.join(OUTPUT_DIR_PATH, f"organise_{datestamp}.csv")
+    csv_writer.save(files_df, summary_path)
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
+
 
 def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
     match unit:
@@ -320,16 +326,15 @@ def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
 
 def restore(
         report_name: str,
-        operation: Callable,
+        op_name: str,
         config: Config
     ) -> pd.DataFrame:
 
-    op_name = operation.__name__
+    op_func = OPERATIONS.get(op_name)
+    if op_func is None:
+        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=OPERATIONS)) #--- Error ---
 
-    if operation not in (copy, move):
-        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in (copy, move)]))
-
-    if operation is move:
+    if op_name == "move":
         base = Warnings.ELEMENTS["base"].build()
         offset = len(base) - Warnings.ANSI_LEN
         response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
@@ -342,13 +347,15 @@ def restore(
     for cache in (register, metadata):
         cache.load()
 
+    # alternative restore workflow
+
     report_path = os.path.join(OUTPUT_DIR_PATH, report_name)
     if not os.path.exists(report_path):
         raise FileNotFoundError(f"Report not found: {report_path}")
     files_df = pd.read_csv(report_path)
     if files_df.empty:
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
-    files_df = files_df[[dest(ColNames.ROOT),dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.FILE_DIR_PATH), ColNames.FILE_PATH]]
+    files_df = files_df[[dest(ColNames.ROOT), dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.FILE_DIR_PATH), ColNames.FILE_PATH]]
     files_df = files_df.rename(columns={
         dest(ColNames.ROOT): ColNames.ROOT,
         dest(ColNames.FILE_ID): ColNames.FILE_ID,
@@ -356,25 +363,21 @@ def restore(
         dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
         ColNames.FILE_PATH: dest(ColNames.FILE_PATH)
     })
-    files_df = execute_operation(files_df, operation, register, metadata)
+    files_df = execute_op(files_df, op_name, op_func, register, metadata)
 
     # Save cache
     register.save(dropna=False)
     metadata.save(dropna=True)
 
     # Save summary
-    files_df = files_df.dropna(axis="columns", how="all")
-    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
-    summary_path = os.path.join(OUTPUT_DIR_PATH, f"restore_{datestamp}.csv")
-    config.csv_writer.save(files_df, summary_path)
-    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
+    save_op_report(files_df, config.csv_writer)
 
     return files_df
 
 def organise(
         src_roots: list[str],
         dest_root: str,
-        operation: Callable,
+        op_name: str,
         config: Config,
         file_categories: list[str] = None,
         clear_cache: bool = False,
@@ -382,15 +385,15 @@ def organise(
 
     # implement category consistency check
 
-    op_name = operation.__name__
     is_cross_drive = {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
     drive_scope = "ACROSS DRIVES" if is_cross_drive else "ON THE SAME DRIVE"
     print(f"{op_name.upper()} FILES {drive_scope}")
 
-    if operation not in (copy, move):
-        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=[op.__name__ for op in (copy, move)])) #--- Error ---
+    op_func = OPERATIONS.get(op_name)
+    if op_func is None:
+        raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=OPERATIONS)) #--- Error ---
 
-    if operation is move:
+    if op_name == "move":
         base = Warnings.ELEMENTS["base"].build()
         offset = len(base) - Warnings.ANSI_LEN
         response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
@@ -446,7 +449,7 @@ def organise(
     files_df = add_file_id(prefix="").run(files_df)
 
     # Check if there is enough space to process files
-    if operation is copy or (operation is move and is_cross_drive):
+    if op_name == "copy" or (op_name is "move" and is_cross_drive):
         required = files_df[ColNames.SIZE].sum()
         _, _, free = shutil.disk_usage(dest_root)
         if required >= free:
@@ -535,18 +538,14 @@ def organise(
     files_df = assemble_file_path(prefix="Dest").run(files_df)
 
     # Execute operation
-    files_df = execute_operation(files_df, operation, register, metadata)
+    files_df = execute_op(files_df, op_name, op_func, register, metadata)
 
     # Save cache
     register.save(dropna=False)
     metadata.save(dropna=True)
 
     # Save summary
-    files_df = files_df.dropna(axis="columns", how="all")
-    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
-    summary_path = os.path.join(OUTPUT_DIR_PATH, f"organise_{datestamp}.csv")
-    config.csv_writer.save(files_df, summary_path)
-    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
+    save_op_report(files_df, config.csv_writer)
 
     return files_df
 
@@ -586,7 +585,7 @@ def main():
        organise(
             src_roots=args.src,
             dest_root=args.dest,
-            operation=OP_DICT.get(args.op),
+            op_name=args.op,
             config=config,
             file_categories=args.cat,
             clear_cache=args.clear,
@@ -595,7 +594,7 @@ def main():
     elif args.command == "restore":
         restore(
             report_name=args.report,
-            operation=OP_DICT.get(args.op),
+            op_name=args.op,
             config=config
         )
     else:
