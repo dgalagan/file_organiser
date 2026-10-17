@@ -16,6 +16,7 @@ from dataframe.predicate import Condition
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
 from datetime import datetime
+import time
 import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
@@ -25,6 +26,8 @@ from typing import Callable, Literal
 from utils.path import get_drive, iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
 from utils.json import load_json
 from collections import defaultdict
+import json
+
 
 ###############################
 ############ TO-DO ############
@@ -306,13 +309,17 @@ def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register
 
     return files_df
 
-def save_op_report(files_df: pd.DataFrame, csv_writer: CSVWriter) -> None:
+def save_op_report(files_df: pd.DataFrame, timestamp) -> None:
     files_df = files_df.dropna(axis="columns", how="all")
-    datestamp = datetime.strftime(datetime.now(), "%Y%m%dT%H%M%S")
-    summary_path = os.path.join(OUTPUT_DIR_PATH, f"organise_{datestamp}.csv")
-    csv_writer.save(files_df, summary_path)
-    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(summary_path, PROJECT_ROOT))}") #--- Notification ---
+    report_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}organise.csv") # distinguish between restore and organise
+    CSVWriter(encoding="utf-8-sig").save(files_df, report_path)
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(report_path, PROJECT_ROOT))}") #--- Notification ---
 
+def save_restore_data(files_df: pd.DataFrame, timestamp):
+    files_df = files_df.dropna(axis="columns", how="all")
+    src_to_dest_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}src_to_dest.csv")
+    CSVWriter(encoding="utf-8-sig").save(files_df[[ColNames.FILE_ID, ColNames.ROOT, ColNames.FILE_DIR_PATH, ColNames.FILE_PATH, dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_DIR_PATH), dest(ColNames.FILE_PATH)]], src_to_dest_path) # fix workflow
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(src_to_dest_path, PROJECT_ROOT))}") #--- Notification ---
 
 def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
     match unit:
@@ -320,15 +327,23 @@ def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
         case "GB": return int(n_bytes / 1024 ** 3)
         case "TB": return int(n_bytes / 1024 ** 4)
 
+def latest_run_id() -> str:
+    run_dirs = sorted(os.listdir(OUTPUT_DIR_PATH))
+    if not run_dirs:
+        raise ValueError("No runs to restore")
+    return run_dirs[-1]
+
 ###############################
 ####### MAIN FUNCTIONS ########
 ###############################
 
 def restore(
-        report_name: str,
+        run_id: str,
         op_name: str,
-        config: Config
+        config: Config,
     ) -> pd.DataFrame:
+
+    timestamp = time.time_ns()
 
     op_func = OPERATIONS.get(op_name)
     if op_func is None:
@@ -347,22 +362,21 @@ def restore(
     for cache in (register, metadata):
         cache.load()
 
-    # alternative restore workflow
-
-    report_path = os.path.join(OUTPUT_DIR_PATH, report_name)
-    if not os.path.exists(report_path):
-        raise FileNotFoundError(f"Report not found: {report_path}")
-    files_df = pd.read_csv(report_path)
+    data_path = f"{OUTPUT_DIR_PATH}\\{run_id}\\src_to_dest.csv"
+    
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Report not found: {data_path}")
+    files_df = pd.read_csv(data_path)
     if files_df.empty:
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
-    files_df = files_df[[dest(ColNames.ROOT), dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.FILE_DIR_PATH), ColNames.FILE_PATH]]
-    files_df = files_df.rename(columns={
-        dest(ColNames.ROOT): ColNames.ROOT,
-        dest(ColNames.FILE_ID): ColNames.FILE_ID,
-        dest(ColNames.FILE_DIR_PATH): ColNames.FILE_DIR_PATH,
-        dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
-        ColNames.FILE_PATH: dest(ColNames.FILE_PATH)
-    })
+    
+    files_df = files_df[[ColNames.FILE_ID, ColNames.ROOT, ColNames.FILE_DIR_PATH, ColNames.FILE_PATH, dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_DIR_PATH), dest(ColNames.FILE_PATH)]]
+    new_src = files_df[[dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_DIR_PATH), dest(ColNames.FILE_PATH)]]
+    new_src = new_src.rename(columns={col:col.replace("Dest", "") for col in new_src.columns})
+    new_dest = files_df[[ColNames.FILE_ID, ColNames.ROOT, ColNames.FILE_DIR_PATH, ColNames.FILE_PATH]]
+    new_dest = new_dest.rename(columns={col:dest(col) for col in new_dest.columns})
+    files_df = new_src.join(new_dest)
+    
     files_df = execute_op(files_df, op_name, op_func, register, metadata)
 
     # Save cache
@@ -370,7 +384,8 @@ def restore(
     metadata.save(dropna=True)
 
     # Save summary
-    save_op_report(files_df, config.csv_writer)
+    save_op_report(files_df, timestamp)
+    save_restore_data(files_df, timestamp)
 
     return files_df
 
@@ -383,6 +398,7 @@ def organise(
         clear_cache: bool = False,
     ) -> pd.DataFrame:
 
+    timestamp = time.time_ns()
     # implement category consistency check
 
     is_cross_drive = {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
@@ -449,7 +465,7 @@ def organise(
     files_df = add_file_id(prefix="").run(files_df)
 
     # Check if there is enough space to process files
-    if op_name == "copy" or (op_name is "move" and is_cross_drive):
+    if op_name == "copy" or (op_name == "move" and is_cross_drive):
         required = files_df[ColNames.SIZE].sum()
         _, _, free = shutil.disk_usage(dest_root)
         if required >= free:
@@ -528,11 +544,8 @@ def organise(
         files_df = config.schema_dims_map[dim].run(files_df)
     
     for cat, dims in dispatched_dir_schema.items():
-        requested_dims = [ColNames.ROOT, ColNames.FILE_CATEGORY] + dims if dims else []
-        if dims:
-            files_df = assemble_dest_dir(requested_dims, cat).run(files_df)
-        else:
-            files_df = assemble_dest_dir(requested_dims, cat).run(files_df)
+        requested_dims = [dest(ColNames.ROOT), ColNames.FILE_CATEGORY] + dims if dims else []
+        files_df = assemble_dest_dir(requested_dims, cat).run(files_df)
 
     # Assemble dest file path
     files_df = assemble_file_path(prefix="Dest").run(files_df)
@@ -543,9 +556,10 @@ def organise(
     # Save cache
     register.save(dropna=False)
     metadata.save(dropna=True)
-
+    
     # Save summary
-    save_op_report(files_df, config.csv_writer)
+    save_op_report(files_df, timestamp)
+    save_restore_data(files_df, timestamp)
 
     return files_df
 
@@ -563,11 +577,11 @@ def main():
 
     # restore command
     res = subparsers.add_parser("restore")
-    res.add_argument("--report", required=True, help="Data for restore")
     res.add_argument("--op", choices=["move", "copy"], default="copy")
+    res.add_argument("--run_id", help="Data for restore")
+    res.add_argument("--last", action="store_true", help="Restore from last run")
 
     args = parser.parse_args()
-
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)
 
@@ -593,7 +607,7 @@ def main():
 
     elif args.command == "restore":
         restore(
-            report_name=args.report,
+            run_id=latest_run_id() if args.last else args.run_id,
             op_name=args.op,
             config=config
         )
