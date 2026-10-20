@@ -6,8 +6,8 @@
     "Image": [
         ["FileHashDupLabel", true],
         ["EarliestYear", true],
-        ["ImageCountry", true],
-        ["EXIF:Model", true]
+        ["EXIF:Model", true],
+        ["ImageCountry", true]
     ],
     "Data-Excel": [
         ["FileHashDupLabel", true],

@@ -83,7 +83,7 @@ def is_accessible(path: str) -> bool:
 
 def get_file_dir(path: str) -> str:
     if not is_file(path):
-        raise FileNotFoundError(f"No such file: {path}")   
+        raise FileNotFoundError(f"No such file: {path}")
     return os.path.dirname(path)
 
 def get_filename(path) -> str:

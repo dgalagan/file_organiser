@@ -8,14 +8,12 @@ from core.col_names import ColNames, dest
 from core.col_filter_presets import registry_cols, metadata_cols, date_cols
 from core.parser import DateParser
 from core.exif import Exif
-from core.categories import Category, CategorySelection
 from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, build_dims_map, assemble_dest_dir
 from dataclasses import dataclass
 from dataframe.pipeline import Pipeline, Compute, FilterRows
 from dataframe.predicate import Condition
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
-from datetime import datetime
 import time
 import os
 import pandas as pd
@@ -23,10 +21,9 @@ from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
 from typing import Callable, Literal
-from utils.path import get_drive, iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
-from utils.json import load_json
+from utils.path import get_drive, get_file_dir, iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
+from utils.json import load_json, save_json
 from collections import defaultdict
-import json
 
 
 ###############################
@@ -92,6 +89,17 @@ class MenuActions(StrEnum):
 ###############################
 ########### HELPERS ###########
 ###############################
+
+def check_cross_drive(src_roots: list[str], dest_root):
+    return {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
+
+def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
+    match unit:
+        case "MB": return int(n_bytes / 1024 ** 2)
+        case "GB": return int(n_bytes / 1024 ** 3)
+        case "TB": return int(n_bytes / 1024 ** 4)
+
+
 def inspect_directories(dir_paths: list[str]) -> dict[str, DirLoc]:
     unique_dir_paths = set(os.path.normpath(dir_path) for dir_path in dir_paths)
     dir_loc_map: dict[str, DirLoc] = {}
@@ -209,7 +217,7 @@ def build_processing_configs(dir_loc_map: dict[str, DirLoc]) -> dict[str, DirPro
     if not dir_config_map:
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="src roots")) #--- Error ---
 
-    print(f"\nOutput tree")
+    print(f"\nSelected depth tree")
     show_directories_tree(dir_loc_map, coverage_bar)
     
     return dir_config_map
@@ -237,6 +245,7 @@ def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: 
             print()
             return -1, MenuActions.INTERRUPT
 
+
 def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
     dirs_to_del = defaultdict(set)
     for _, row in dirs_df.iterrows():
@@ -248,7 +257,34 @@ def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
                 dirs_to_del[level+1].add(dir_to_del)
     return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
 
+def save_op_report(files_df: pd.DataFrame, timestamp) -> None:
+    files_df = files_df.dropna(axis="columns", how="all")
+    report_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}organise.csv") # distinguish between restore and organise
+    CSVWriter(encoding="utf-8-sig").save(files_df, report_path)
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(report_path, PROJECT_ROOT))}") #--- Notification ---
+
+def latest_run_id() -> str:
+    move_history = load_json("cache\\move_history.json")
+    run_id = max(move_history.keys())
+    if not run_id:
+        raise ValueError("No runs to restore")
+    return run_id
+
+###############################
+####### MAIN FUNCTIONS ########
+###############################
+
 def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register: Cache, metadata: Cache):
+    
+    # Check if operation is crossdrive
+    is_cross_drive = check_cross_drive(files_df[ColNames.ROOT].unique(), files_df[dest(ColNames.ROOT)].unique()[0])
+
+    # Prepare dirs to clean up
+    dirs_to_del = []
+    if op_name == "move":
+        dirs_df = files_df[[ColNames.ROOT, ColNames.FILE_PATH]]
+        dirs_df[ColNames.FILE_DIR_PATH] = dirs_df[ColNames.FILE_PATH].apply(get_file_dir)
+        dirs_to_del = collect_dirs_to_delete(dirs_df)
 
     # Execute operation
     tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
@@ -264,9 +300,7 @@ def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register
 
     # Remove emptied dirs
     errors = []
-    if op_name == "move":
-        dirs_df = files_df[[ColNames.ROOT, ColNames.FILE_DIR_PATH]].drop_duplicates()
-        dirs_to_del = collect_dirs_to_delete(dirs_df)
+    if dirs_to_del:
         for dir_to_del in tqdm(dirs_to_del, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR): #--- TQDM ---
             try:
                 os.rmdir(dir_to_del)
@@ -277,65 +311,28 @@ def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register
 
     # Post operation cache sync
     # Identify successfully completed operation cases
-    completed = files_df.loc[files_df[op_name].isna(), [ColNames.FILE_ID, dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.INODE_DEV), dest(ColNames.INODE)]]
+    completed = files_df.loc[files_df[op_name].isna(), [dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_PATH)]].set_index(dest(ColNames.FILE_ID))
     completed = completed.rename(
         columns = {
+            dest(ColNames.ROOT): ColNames.ROOT,
             dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
-            dest(ColNames.INODE_DEV): ColNames.INODE_DEV,
-            dest(ColNames.INODE): ColNames.INODE,
         }
     )
-    # Check file id change post operation
-    # If file id changed (move to another drive, copy) clone cache record from old to new id and update entry, delete old ones if move
-    # If no change (move within drive) update ffile path only
-    no_chg_id = completed.loc[completed[ColNames.FILE_ID] == completed[dest(ColNames.FILE_ID)]]
-    no_chg_id = no_chg_id[[ColNames.FILE_ID, ColNames.FILE_PATH]].set_index(ColNames.FILE_ID)
-
-    chg_id = completed.loc[completed[ColNames.FILE_ID] != completed[dest(ColNames.FILE_ID)]]
-    src_to_dest = dict(zip(chg_id[ColNames.FILE_ID], chg_id[dest(ColNames.FILE_ID)]))
-    chg_id = chg_id[[dest(ColNames.FILE_ID), ColNames.FILE_PATH, ColNames.INODE_DEV, ColNames.INODE]].set_index(dest(ColNames.FILE_ID))
-
-    # Update cache
+    
     for cache in (register, metadata):
-        if not no_chg_id.empty:
-            cache.update(no_chg_id.convert_dtypes()) # ensure dtype alignment
-        if not chg_id.empty:
+        if op_name == "copy" or (op_name == "move" and is_cross_drive):
+            src_to_dest = dict(zip(files_df[ColNames.FILE_ID], files_df[dest(ColNames.FILE_ID)]))
             cache.clone(src_to_dest)
-            cache.update(chg_id.convert_dtypes()) # ensure dtype alignment
             if op_name == "move":
                 # drop stale cache entries
-                stale_ids = list(src_to_dest.keys())
-                cache.delete(stale_ids)
+                cache.delete(list(src_to_dest.keys()))
+    
+    register.update(completed.convert_dtypes()) # ensure dtype alignment
+    metadata.update(completed[[ColNames.FILE_PATH]].convert_dtypes()) # ensure dtype alignment
+
+    # potentially add remove dirs here
 
     return files_df
-
-def save_op_report(files_df: pd.DataFrame, timestamp) -> None:
-    files_df = files_df.dropna(axis="columns", how="all")
-    report_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}organise.csv") # distinguish between restore and organise
-    CSVWriter(encoding="utf-8-sig").save(files_df, report_path)
-    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(report_path, PROJECT_ROOT))}") #--- Notification ---
-
-def save_restore_data(files_df: pd.DataFrame, timestamp):
-    files_df = files_df.dropna(axis="columns", how="all")
-    src_to_dest_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}src_to_dest.csv")
-    CSVWriter(encoding="utf-8-sig").save(files_df[[ColNames.FILE_ID, ColNames.ROOT, ColNames.FILE_DIR_PATH, ColNames.FILE_PATH, dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_DIR_PATH), dest(ColNames.FILE_PATH)]], src_to_dest_path) # fix workflow
-    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(src_to_dest_path, PROJECT_ROOT))}") #--- Notification ---
-
-def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
-    match unit:
-        case "MB": return int(n_bytes / 1024 ** 2)
-        case "GB": return int(n_bytes / 1024 ** 3)
-        case "TB": return int(n_bytes / 1024 ** 4)
-
-def latest_run_id() -> str:
-    run_dirs = sorted(os.listdir(OUTPUT_DIR_PATH))
-    if not run_dirs:
-        raise ValueError("No runs to restore")
-    return run_dirs[-1]
-
-###############################
-####### MAIN FUNCTIONS ########
-###############################
 
 def restore(
         run_id: str,
@@ -362,22 +359,26 @@ def restore(
     for cache in (register, metadata):
         cache.load()
 
-    data_path = f"{OUTPUT_DIR_PATH}\\{run_id}\\src_to_dest.csv"
+    # if not os.path.exists(data_path):
+    #     raise FileNotFoundError(f"Report not found: {data_path}")
+
+    move_history = load_json("cache\\move_history.json")
+    loaded_history = move_history.get(run_id, {})
     
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Report not found: {data_path}")
-    files_df = pd.read_csv(data_path)
-    if files_df.empty:
-        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
+    # if files_df.empty:
+    #     raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
     
-    files_df = files_df[[ColNames.FILE_ID, ColNames.ROOT, ColNames.FILE_DIR_PATH, ColNames.FILE_PATH, dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_DIR_PATH), dest(ColNames.FILE_PATH)]]
-    new_src = files_df[[dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_DIR_PATH), dest(ColNames.FILE_PATH)]]
-    new_src = new_src.rename(columns={col:col.replace("Dest", "") for col in new_src.columns})
-    new_dest = files_df[[ColNames.FILE_ID, ColNames.ROOT, ColNames.FILE_DIR_PATH, ColNames.FILE_PATH]]
-    new_dest = new_dest.rename(columns={col:dest(col) for col in new_dest.columns})
-    files_df = new_src.join(new_dest)
+    files_df = pd.DataFrame().from_dict(loaded_history, orient="index")
+    files_df = files_df.rename(columns={col:dest(col) for col in files_df.columns})
+    files_df = files_df.join(register.data[[ColNames.ROOT, ColNames.FILE_PATH, ColNames.SIZE]], how="left")
+    files_df = files_df.reset_index(names=[ColNames.FILE_ID])
     
     files_df = execute_op(files_df, op_name, op_func, register, metadata)
+
+    if op_name == "move":
+        log_data = files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID))
+        move_history[timestamp] = log_data.to_dict(orient="index")
+        save_json(move_history, "cache\\move_history.json")
 
     # Save cache
     register.save(dropna=False)
@@ -385,7 +386,6 @@ def restore(
 
     # Save summary
     save_op_report(files_df, timestamp)
-    save_restore_data(files_df, timestamp)
 
     return files_df
 
@@ -397,11 +397,12 @@ def organise(
         file_categories: list[str] = None,
         clear_cache: bool = False,
     ) -> pd.DataFrame:
-
-    timestamp = time.time_ns()
+    
     # implement category consistency check
 
-    is_cross_drive = {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
+    timestamp = time.time_ns()
+    
+    is_cross_drive = check_cross_drive(src_roots, dest_root)
     drive_scope = "ACROSS DRIVES" if is_cross_drive else "ON THE SAME DRIVE"
     print(f"{op_name.upper()} FILES {drive_scope}")
 
@@ -490,7 +491,7 @@ def organise(
     print(Notifications.ELEMENTS["cache_load"].build(indent=1, n=n_loaded, n_total=n_total, share=n_loaded/n_total))#--- Notification ---
 
     # Extract exif metadata
-    to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[ColNames.FILE_PATH, ColNames.FILE_ID, ColNames.INODE_DEV, ColNames.INODE]]
+    to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[ColNames.FILE_PATH, ColNames.FILE_ID]]
     if not to_exif_df.empty:
         files_to_exif = to_exif_df[ColNames.FILE_PATH].to_list()
         n_files = len(files_to_exif)
@@ -525,8 +526,7 @@ def organise(
     # Filter file category
     if file_categories:
         files_df = FilterRows(Condition(ColNames.FILE_CATEGORY, "isin", file_categories)).run(files_df)
-        n_filtered = n_total - len(files_df)
-        print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=n_filtered/n_total)) #--- Notification ---
+        print(Notifications.ELEMENTS["selected"].build(indent=1, n=len(files_df), n_total=n_total, share=len(files_df)/n_total)) #--- Notification ---
         if files_df.empty:
             raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
@@ -553,13 +553,19 @@ def organise(
     # Execute operation
     files_df = execute_op(files_df, op_name, op_func, register, metadata)
 
+    # Store src to dest file id pair
+    if op_name == "move":
+        move_history = load_json("cache\\move_history.json")
+        log_data = files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID))
+        move_history[timestamp] = log_data.to_dict(orient="index")
+        save_json(move_history, "cache\\move_history.json")
+
     # Save cache
     register.save(dropna=False)
     metadata.save(dropna=True)
     
     # Save summary
     save_op_report(files_df, timestamp)
-    save_restore_data(files_df, timestamp)
 
     return files_df
 
@@ -567,12 +573,16 @@ def main():
     parser = argparse.ArgumentParser(description="File organiser")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Select mode")
 
+    # load ref data
+    ref_data = pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852") # review  encoding issue
+    file_categories = sorted(ref_data[ColNames.FILE_CATEGORY].unique())
+
     # organise command
     org = subparsers.add_parser("organise")
-    org.add_argument("--src", nargs="+", required=True, help="Source directories")
+    org.add_argument("--op", choices=OPERATIONS, default="copy")
+    org.add_argument("--src", required=True, nargs="+", help="Source directories")
     org.add_argument("--dest", required=True, help="Destination directory")
-    org.add_argument("--op", choices=["move", "copy"], default="copy")
-    org.add_argument("--cat", choices=[Category], default=None, help="Select file category")
+    org.add_argument("--cat", choices=file_categories, nargs="+", default=None, help="Select file category")
     org.add_argument("--clear", action="store_true", help="Clear cache tables")
 
     # restore command
@@ -582,13 +592,15 @@ def main():
     res.add_argument("--last", action="store_true", help="Restore from last run")
 
     args = parser.parse_args()
+
+    # prepare config
     json_loader = JSONLoader(orient="index")
     json_writer = JSONWriter(orient="index", force_ascii=False)
 
     config = Config(
         register=Cache(path=REGISTER_PATH, writer=json_writer, loader=json_loader),
         metadata=Cache(path=METADATA_PATH, writer=json_writer, loader=json_loader),
-        ref=pd.read_csv(EXTENSION_MAP_PATH, encoding="cp852"), # review  encoding issue
+        ref=ref_data,
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
         csv_writer=CSVWriter(encoding="utf-8-sig"),
         dir_schema=load_json(DIR_SCHEMA_PATH),
