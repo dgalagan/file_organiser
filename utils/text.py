@@ -30,7 +30,7 @@ def count_letters(text: str) -> int:
     is_letters = [char.isalpha() for char in text]
     return (sum(is_letters))
 
-def find_char(text:str, char:str) -> int:
+def find_char_pos(text: str, char: str) -> int:
     return text.find(char)
 
 def get_chars_pattern(text: str) -> tuple[str, dict[int, str]]:

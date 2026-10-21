@@ -21,9 +21,8 @@ from reverse_geocoder import RGeocoder
 import shutil
 from tqdm import tqdm
 from typing import Callable, Literal
-from utils.path import get_drive, get_file_dir, iter_dir_tree, tree_depth, depth_from_drive, is_parent, is_dir, is_empty, move, copy
+from utils.path import get_drive, get_intermediate_dirs, iter_dir_tree, tree_depth, depth_from_drive, path_depth, is_parent, is_dir, is_empty, move, copy
 from utils.json import load_json, save_json
-from collections import defaultdict
 
 
 ###############################
@@ -99,6 +98,13 @@ def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
         case "GB": return int(n_bytes / 1024 ** 3)
         case "TB": return int(n_bytes / 1024 ** 4)
 
+def remove_dir(path: str) -> bool:
+    try:
+        os.rmdir(path)
+        return True
+    except OSError as e:
+        # implement logging functionality -> Errors.ELEMENTS["exception"].build(indent=3, path=path, errno=e.errno) #--- Error ---
+        return False
 
 def inspect_directories(dir_paths: list[str]) -> dict[str, DirLoc]:
     unique_dir_paths = set(os.path.normpath(dir_path) for dir_path in dir_paths)
@@ -107,7 +113,7 @@ def inspect_directories(dir_paths: list[str]) -> dict[str, DirLoc]:
         if not is_dir(dir_path) or is_empty(dir_path):
             continue
         dir_loc_map[dir_path] = DirLoc(
-            level=depth_from_drive(dir_path),
+            level = depth_from_drive(dir_path),
             depth = tree_depth(dir_path)
         )
     return dir_loc_map
@@ -246,17 +252,6 @@ def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: 
             return -1, MenuActions.INTERRUPT
 
 
-def collect_dirs_to_delete(dirs_df: pd.DataFrame) -> list[str]:
-    dirs_to_del = defaultdict(set)
-    for _, row in dirs_df.iterrows():
-        relpath = os.path.relpath(row[ColNames.FILE_DIR_PATH], row[ColNames.ROOT])
-        if relpath != '.':
-            dir_parts = relpath.split(os.sep)
-            for level in range(len(dir_parts)): # ensure consistent naming
-                dir_to_del = os.path.join(row[ColNames.ROOT], os.sep.join(dir_parts[:level+1]))
-                dirs_to_del[level+1].add(dir_to_del)
-    return [dir_path for level in sorted(dirs_to_del, reverse=True) for dir_path in dirs_to_del[level]]
-
 def save_op_report(files_df: pd.DataFrame, timestamp) -> None:
     files_df = files_df.dropna(axis="columns", how="all")
     report_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}organise.csv") # distinguish between restore and organise
@@ -279,13 +274,6 @@ def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register
     # Check if operation is crossdrive
     is_cross_drive = check_cross_drive(files_df[ColNames.ROOT].unique(), files_df[dest(ColNames.ROOT)].unique()[0])
 
-    # Prepare dirs to clean up
-    dirs_to_del = []
-    if op_name == "move":
-        dirs_df = files_df[[ColNames.ROOT, ColNames.FILE_PATH]]
-        dirs_df[ColNames.FILE_DIR_PATH] = dirs_df[ColNames.FILE_PATH].apply(get_file_dir)
-        dirs_to_del = collect_dirs_to_delete(dirs_df)
-
     # Execute operation
     tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
     files_df[op_name] = files_df.progress_apply(lambda row: op_func(row[ColNames.FILE_PATH], row[dest(ColNames.FILE_PATH)]), axis=1)
@@ -297,17 +285,6 @@ def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register
     n_failed = len(files_df[op_name].loc[files_df[op_name].notna()])
     print(Notifications.ELEMENTS["op_done"].build(indent=3, n=n_succeeded, n_total=n_total, share=n_succeeded/n_total)) #--- Notification ---
     print(Notifications.ELEMENTS["op_failed"].build(indent=3, n=n_failed, n_total=n_total, share=n_failed/n_total)) #--- Notification ---
-
-    # Remove emptied dirs
-    errors = []
-    if dirs_to_del:
-        for dir_to_del in tqdm(dirs_to_del, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR): #--- TQDM ---
-            try:
-                os.rmdir(dir_to_del)
-            except OSError as e:
-                errors.append(Errors.ELEMENTS["exception"].build(indent=3, path=dir_to_del, errno=e.errno)) #--- Error ---
-    if errors:
-        print("\n".join(errors))
 
     # Post operation cache sync
     # Identify successfully completed operation cases
@@ -372,8 +349,19 @@ def restore(
     files_df = files_df.rename(columns={col:dest(col) for col in files_df.columns})
     files_df = files_df.join(register.data[[ColNames.ROOT, ColNames.FILE_PATH, ColNames.SIZE]], how="left")
     files_df = files_df.reset_index(names=[ColNames.FILE_ID])
+
+    # Collect dirs between root and identified files
+    if op_name == "move":
+        intermediate_dirs = set()
+        for row in files_df[[ColNames.ROOT, ColNames.FILE_PATH]].itertuples(index=False):
+            intermediate_dirs.update(get_intermediate_dirs(row.FilePath, row.Root))
     
     files_df = execute_op(files_df, op_name, op_func, register, metadata)
+    
+    # Remove empty intermediate dirs
+    inrtermediate_dirs = sorted(intermediate_dirs, key=lambda x: path_depth(x), reverse=True)
+    summary = [remove_dir(intermediate_dir) for intermediate_dir in tqdm(inrtermediate_dirs, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR)]
+    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=sum(summary), n_total=len(summary), share=sum(summary)/len(summary)))
 
     if op_name == "move":
         log_data = files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID))
@@ -550,8 +538,19 @@ def organise(
     # Assemble dest file path
     files_df = assemble_file_path(prefix="Dest").run(files_df)
 
+    # Collect dirs between root and identified files
+    if op_name == "move":
+        intermediate_dirs = set()
+        for row in files_df[[ColNames.ROOT, ColNames.FILE_PATH]].itertuples(index=False):
+            intermediate_dirs.update(get_intermediate_dirs(row.FilePath, row.Root))
+
     # Execute operation
     files_df = execute_op(files_df, op_name, op_func, register, metadata)
+
+    # Remove empty intermediate dirs
+    inrtermediate_dirs = sorted(intermediate_dirs, key=lambda x: path_depth(x), reverse=True)
+    summary = [remove_dir(intermediate_dir) for intermediate_dir in tqdm(inrtermediate_dirs, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR)]
+    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=sum(summary), n_total=len(summary), share=sum(summary)/len(summary)))
 
     # Store src to dest file id pair
     if op_name == "move":

@@ -5,14 +5,23 @@ from typing import Iterable, Iterator
 from utils.text import strip_text, lstrip_text, rstrip_text, split_text, count_letters, uppercase_text
 
 # General
+
+def is_path(path: str) -> bool:
+    return os.path.exists(path)
+
+def is_parent(path: str, of_path: str) -> bool:
+    if not is_path(path):
+        raise ValueError(f"Provided path '{path}' does not exists")
+    elif not is_path(of_path):
+        raise ValueError(f"Provided path '{of_path}' does not exists")
+    common_path = get_common_path([path, of_path]) 
+    return path == common_path and path != of_path
+
 def get_drive(path: str) -> str:
     if not os.path.isabs(path):
         raise ValueError(f"expected a abs path, got: {path!r}")
     drive, _ = os.path.splitdrive(path)
     return drive + os.sep
-
-def get_abs_path(path: str) -> str:
-    return os.path.abspath(path)
 
 def get_common_path(paths: Iterable[str]) -> str:
     return os.path.commonpath(paths)
@@ -24,8 +33,32 @@ def get_normalized_path(path: str, path_separator: str = os.sep) -> str:
     if letters_count == 1 and chars_count == 2:
         return normalized_path + path_separator
     elif letters_count == 1 and chars_count == 1:
-        return normalized_path + ":" + path_separator 
+        return normalized_path + ":" + path_separator
     return normalized_path
+
+def get_parents(path: str) -> Iterator[str]:
+    # the input could be abs path as well as relative
+    
+    # abs path: D:\\HDD Data\\1_uniques -> final loop iter -> head = "D:\\", tail = ""
+    # rel path: HDD Data\\1_uniques (rel to D:\\) -> final loop iter -> head = "", tail = "HDD Data"
+
+    # if trailing \\ left D:\\HDD Data\\1_uniques\\: head = "D:\\HDD Data\\1_uniques", tail = ""
+    is_abs_ = os.path.isabs(path)
+    current = os.path.normpath(path) # removes trailing \\
+    while current:
+        head, tail = os.path.split(current)
+        if not tail and is_abs_:
+            break
+        if not head and not is_abs_:
+            break
+        current = head
+        yield head
+
+def get_intermediate_dirs(path: str, start: str) -> list[str]:
+    if not is_parent(start, path):
+        raise ValueError("'parent' must be an ancestor of 'path'")
+    rel_path = os.path.relpath(path, start)
+    return [os.path.join(start, parents) for parents in get_parents(rel_path)]
 
 def path_depth(path: str, path_separator: str = os.sep):
     # remove heading\trailing path separators like "\\folder", "folder\\"
@@ -123,12 +156,6 @@ def is_empty(path:str) -> bool:
     if not is_dir(path):
         raise NotADirectoryError(f"Provided path '{path}' is not a dir")
     return not os.listdir(path)
-
-def is_parent(path: str, of_path: str) -> bool:
-    if not  is_dir(path) or not is_dir(of_path):
-        raise NotADirectoryError(f"Provided path '{path}' is not a dir")
-    common_path = get_common_path([path, of_path]) 
-    return path == common_path and path != of_path
 
 def tree_depth(path: str) -> int:
     if not is_dir(path):
