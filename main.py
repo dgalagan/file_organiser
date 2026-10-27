@@ -542,9 +542,9 @@ def organise(
     category_mask = (Condition(ColNames.FILE_CATEGORY, "isin", file_categories) if file_categories else AllRows()).apply(files_df)
     files_df = files_df.loc[category_mask]
     n_total = len(category_mask)
-    n_filtered = n_total - category_mask.sum()
-    share = n_filtered/n_total if n_total else 0.0
-    print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=share)) #--- Notification ---
+    n_selected = category_mask.sum()
+    share = n_selected/n_total if n_total else 0.0
+    print(Notifications.ELEMENTS["slected"].build(indent=1, n=n_selected, n_total=n_total, share=share)) #--- Notification ---
     if files_df.empty:
         raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 

@@ -123,7 +123,7 @@ class Notifications(Component):
     ICON:  ClassVar[str] = Icon.INFORMATION
     SEPARATOR: ClassVar[str] = Separator.SPACE
     
-    Options = Literal["root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done"]
+    Options = Literal["root_stat", "cache_load", "selected", "op_done", "op_failed", "save_done"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "root_stat": (
             Template()
@@ -138,11 +138,11 @@ class Notifications(Component):
             .padding(30)
             .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
         ),
-        "filtered": (
+        "selected": (
             Template()
             .token(ICON)
             .token(SEPARATOR)
-            .message("Filtered")
+            .message("Selected")
             .padding(30)
             .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
         ),
