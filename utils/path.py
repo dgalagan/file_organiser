@@ -5,7 +5,6 @@ from typing import Iterable, Iterator
 from utils.text import strip_text, lstrip_text, rstrip_text, split_text, count_letters, uppercase_text
 
 # General
-
 def is_path(path: str) -> bool:
     return os.path.exists(path)
 
@@ -20,7 +19,7 @@ def is_parent(path: str, of_path: str) -> bool:
 def get_drive(path: str) -> str:
     if not os.path.isabs(path):
         raise ValueError(f"expected a abs path, got: {path!r}")
-    drive, _ = os.path.splitdrive(path)
+    drive, tail = os.path.splitdrive(path)
     return drive + os.sep
 
 def get_common_path(paths: Iterable[str]) -> str:
@@ -36,29 +35,31 @@ def get_normalized_path(path: str, path_separator: str = os.sep) -> str:
         return normalized_path + ":" + path_separator
     return normalized_path
 
-def get_parents(path: str) -> Iterator[str]:
+def get_parents(path: str, start: str | None = None) -> Iterator[str]:
     # the input could be abs path as well as relative
     
     # abs path: D:\\HDD Data\\1_uniques -> final loop iter -> head = "D:\\", tail = ""
     # rel path: HDD Data\\1_uniques (rel to D:\\) -> final loop iter -> head = "", tail = "HDD Data"
 
     # if trailing \\ left D:\\HDD Data\\1_uniques\\: head = "D:\\HDD Data\\1_uniques", tail = ""
-    is_abs_ = os.path.isabs(path)
-    current = os.path.normpath(path) # removes trailing \\
+    
+    if start is not None:
+        if not is_parent(start, path):
+            raise ValueError(f"{start} must be an ancestor of {path}")
+        start = os.path.normpath(start) # remove trailing slashes
+    
+    is_abs = os.path.isabs(path)
+    current = os.path.normpath(path) # remove trailing slashes
     while current:
         head, tail = os.path.split(current)
-        if not tail and is_abs_:
-            break
-        if not head and not is_abs_:
-            break
+        if is_abs:
+            if not tail or head == start:
+                break
+        else:
+            if not head or head == start:
+                break
         current = head
         yield head
-
-def get_intermediate_dirs(path: str, start: str) -> list[str]:
-    if not is_parent(start, path):
-        raise ValueError("'parent' must be an ancestor of 'path'")
-    rel_path = os.path.relpath(path, start)
-    return [os.path.join(start, parents) for parents in get_parents(rel_path)]
 
 def path_depth(path: str, path_separator: str = os.sep):
     # remove heading\trailing path separators like "\\folder", "folder\\"
@@ -128,25 +129,35 @@ def parse_filename(filename: str, separator: str = "."):
     ext = lstrip_text(ext, separator)
     return stem, ext
 
-def move(src_path: str, dest_path: str):
+def move(src_path: str, dest_path: str) -> bool:
     try:
         if os.path.exists(dest_path):
-            raise RuntimeError("File already exists at destination")
+            # raise RuntimeError("File already exists at destination")
+            # implement logging
+            return False
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         shutil.move(src_path, dest_path)
         if os.path.exists(src_path):
-            raise RuntimeError("Source file still exists")
+            # raise RuntimeError("Source file still exists")
+            # implement logging
+            return False
+        return True
     except Exception as e:
-        return e
+        # implement logging
+        return False
 
-def copy(src_path: str, dest_path: str):
+def copy(src_path: str, dest_path: str) -> bool:
     try:
         if os.path.exists(dest_path):
-            raise RuntimeError("File already exists at destination")
+            # implement logging
+            # raise RuntimeError("File already exists at destination")
+            return False
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         shutil.copy2(src_path, dest_path)
+        return True
     except Exception as e:
-        return e
+        # implement logging
+        return False
 
 # Dirs specific
 def is_dir(path:str) -> bool:
@@ -180,3 +191,11 @@ def iter_dir_tree(path: str, start_depth: int = 0, target_depth: int = 0) -> Ite
 
         if current_depth >= start_depth:
             yield current_depth, root, files
+
+def remove_dir(path: str) -> bool:
+    try:
+        os.rmdir(path)
+        return True
+    except OSError as e:
+        # implement logging functionality -> Errors.ELEMENTS["exception"].build(indent=3, path=path, errno=e.errno) #--- Error ---
+        return False

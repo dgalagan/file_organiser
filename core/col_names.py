@@ -1,6 +1,7 @@
 class ColNames:
     ROOT = "Root"
     ROOT_PROCESSING_DEPTH = "RootProcessingDepth"
+    ROOT_STAT = "RootStat"
     FILE_NAME = "FileName"
     FILE_EXT = "FileExt"
     FILE_DIR_PATH = "FileDirPath"

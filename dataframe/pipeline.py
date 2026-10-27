@@ -33,6 +33,7 @@ class FilterRows(Step):
 @dataclass
 class ExpandDict(Step):
     col: str
+    key_to_col: dict[str, str]
     where: Predicate = None
 
     def run(self, df: pd.DataFrame):
@@ -40,9 +41,13 @@ class ExpandDict(Step):
         mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
         # execute calculation
         result = pd.json_normalize(df.loc[mask, self.col])
+        # rename result columns
+        result = result.rename(columns=self.key_to_col)
         # assign results
-        df[result.columns] = None
-        df.loc[mask, result.columns] = result
+        # df[result.columns] = None
+        # df.loc[mask, result.columns] = result
+        # assign results via concat
+        df = pd.concat([df, result], axis=1)
         df = df.drop(columns=self.col)
         return df
 

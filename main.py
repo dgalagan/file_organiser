@@ -5,13 +5,13 @@ from cli.tokens import Color
 from constants import PROJECT_ROOT, OUTPUT_DIR_PATH, REGISTER_PATH, METADATA_PATH, EXTENSION_MAP_PATH, DIR_SCHEMA_PATH
 from core.cache import Cache
 from core.col_names import ColNames, dest
-from core.col_filter_presets import registry_cols, metadata_cols, date_cols
+from core.col_filter_presets import registry_filter, metadata_filter, date_filter
 from core.parser import DateParser
 from core.exif import Exif
-from core.pipelines import assemble_file_path, add_stat, add_file_id, consolidate_file_ext, build_dims_map, assemble_dest_dir
+from core.pipelines import assemble_file_path, add_stat, expand_stat, add_file_id, consolidate_file_ext, build_dims_map, assemble_dest_dir
 from dataclasses import dataclass
 from dataframe.pipeline import Pipeline, Compute, FilterRows
-from dataframe.predicate import Condition
+from dataframe.predicate import Condition, AllRows
 from dataframe.write import CSVWriter, JSONWriter
 from dataframe.load import JSONLoader
 import time
@@ -19,9 +19,10 @@ import os
 import pandas as pd
 from reverse_geocoder import RGeocoder
 import shutil
+import sys
 from tqdm import tqdm
-from typing import Callable, Literal
-from utils.path import get_drive, get_intermediate_dirs, iter_dir_tree, tree_depth, depth_from_drive, path_depth, is_parent, is_dir, is_empty, move, copy
+from typing import Literal, Iterable
+from utils.path import get_drive, get_parents, iter_dir_tree, tree_depth, depth_from_drive, path_depth, is_parent, is_dir, is_empty, move, copy, remove_dir
 from utils.json import load_json, save_json
 
 
@@ -89,27 +90,15 @@ class MenuActions(StrEnum):
 ########### HELPERS ###########
 ###############################
 
-def check_cross_drive(src_roots: list[str], dest_root):
-    return {get_drive(src_root) for src_root in src_roots} != {get_drive(dest_root)}
-
 def bytes_converter(n_bytes: int, unit: Literal["MB", "GB", "TB"]) -> int:
     match unit:
         case "MB": return int(n_bytes / 1024 ** 2)
         case "GB": return int(n_bytes / 1024 ** 3)
         case "TB": return int(n_bytes / 1024 ** 4)
 
-def remove_dir(path: str) -> bool:
-    try:
-        os.rmdir(path)
-        return True
-    except OSError as e:
-        # implement logging functionality -> Errors.ELEMENTS["exception"].build(indent=3, path=path, errno=e.errno) #--- Error ---
-        return False
-
 def inspect_directories(dir_paths: list[str]) -> dict[str, DirLoc]:
-    unique_dir_paths = set(os.path.normpath(dir_path) for dir_path in dir_paths)
     dir_loc_map: dict[str, DirLoc] = {}
-    for dir_path in unique_dir_paths:
+    for dir_path in dir_paths:
         if not is_dir(dir_path) or is_empty(dir_path):
             continue
         dir_loc_map[dir_path] = DirLoc(
@@ -251,13 +240,6 @@ def prompt_depth(dir_path: str, depth_range: list[int]) -> tuple[int, StrEnum]: 
             print()
             return -1, MenuActions.INTERRUPT
 
-
-def save_op_report(files_df: pd.DataFrame, timestamp) -> None:
-    files_df = files_df.dropna(axis="columns", how="all")
-    report_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}organise.csv") # distinguish between restore and organise
-    CSVWriter(encoding="utf-8-sig").save(files_df, report_path)
-    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(report_path, PROJECT_ROOT))}") #--- Notification ---
-
 def latest_run_id() -> str:
     move_history = load_json("cache\\move_history.json")
     run_id = max(move_history.keys())
@@ -269,66 +251,144 @@ def latest_run_id() -> str:
 ####### MAIN FUNCTIONS ########
 ###############################
 
-def execute_op(files_df: pd.DataFrame, op_name: str, op_func: Callable, register: Cache, metadata: Cache):
+def print_results(results: Iterable[bool], unit: str) -> None:
     
-    # Check if operation is crossdrive
-    is_cross_drive = check_cross_drive(files_df[ColNames.ROOT].unique(), files_df[dest(ColNames.ROOT)].unique()[0])
+    n_total = len(results)
+    n_succeeded = sum(results)
+    n_failed = n_total - n_succeeded
+    
+    failed_share = n_failed/n_total if n_total else 0.0
+    succeeded_share = n_succeeded/n_total if n_total else 0.0
+    
+    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=n_succeeded, n_total=n_total, share=succeeded_share, unit=unit)) #--- Notification ---
+    print(Notifications.ELEMENTS["op_failed"].build(indent=3, n=n_failed, n_total=n_total, share=failed_share, unit=unit)) #--- Notification ---
+
+def ensure_move_approval() -> None:
+    base = Warnings.ELEMENTS["base"].build()
+    offset = len(base) - Warnings.ANSI_LEN
+    response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
+    if response != 'y':
+        sys.exit(0)
+
+def ensure_drive_space(files_df: pd.DataFrame) -> None:
+    by_root = files_df.groupby(by=dest(ColNames.ROOT))[[ColNames.SIZE]].sum()
+
+    for row in by_root.itertuples():
+        required_space = bytes_converter(row.Size, "GB")
+        free_space = bytes_converter(shutil.disk_usage(row.Index).free, "GB")
+        
+        if required_space >= free_space:
+            raise RuntimeError(Errors.ELEMENTS["low_drive_space"].build(drive=get_drive(row.DestRoot), required=required_space, free=free_space))
+
+def collect_intermediate_dirs(files_df: pd.DataFrame) -> list[str]:
+    rm_input = zip(files_df[ColNames.ROOT], files_df[ColNames.FILE_PATH])
+    intermediate_dirs = {parent_dir for root_dir, file_path in rm_input for parent_dir in get_parents(file_path, root_dir)}
+    return sorted(intermediate_dirs, key=path_depth, reverse=True)
+
+def remove_intermediate_dirs(dir_paths: list[str]) -> pd.Series:
+    rm_results = {dir_path: remove_dir(dir_path) for dir_path in tqdm(dir_paths, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR)}
+    return pd.Series(rm_results, dtype=bool)
+
+def execute_op(files_df: pd.DataFrame, op_name: str) -> pd.Series:
+    op_func = OPERATIONS[op_name]
+    op_input = zip(files_df.index, files_df[ColNames.FILE_PATH], files_df[dest(ColNames.FILE_PATH)])
+    op_results = {
+        idx: op_func(src_path, dest_path)
+        for idx, src_path, dest_path in tqdm(
+            op_input,
+            total=len(files_df.index),
+            desc=TQDMDesc.ELEMENTS[op_name].build(indent=1),
+            bar_format=TQDM_BAR
+        )
+    }
+    return pd.Series(op_results, dtype=bool)
+
+def save_op_report(files_df: pd.DataFrame, timestamp) -> None:
+    files_df = files_df.dropna(axis="columns", how="all")
+    report_path = os.path.join(OUTPUT_DIR_PATH, f"{timestamp}{os.sep}organise.csv") # distinguish between restore and organise
+    CSVWriter(encoding="utf-8-sig").save(files_df, report_path)
+    print(f"\n{Notifications.ELEMENTS["save_done"].build(path=os.path.relpath(report_path, PROJECT_ROOT))}") #--- Notification ---
+
+def run_op_pipeline(files_df: pd.DataFrame, register: Cache, metadata: Cache, op_name: str, timestamp) -> None:
+    # needed columns: 
+    # ColNames.ROOT, ColNames.INODE_DEV, dest(ColNames.ROOT), dest(ColNames.INODE_DEV)
+    # ColNames.FILE_ID, ColNames.FILE_PATH, dest(ColNames.FILE_PATH), ColNames.SIZE
+
+    cross_drive = files_df[ColNames.INODE_DEV] != files_df[dest(ColNames.INODE_DEV)]
+    
+    if op_name == "move":
+        # Propmt user approval
+        ensure_move_approval()
+        # Check available space on the destination drive
+        ensure_drive_space(files_df.loc[cross_drive, [dest(ColNames.ROOT), ColNames.SIZE]])
+        dir_paths = collect_intermediate_dirs(files_df) 
+    elif op_name == "copy":
+        # Check available space on the destination drive
+        ensure_drive_space(files_df[[dest(ColNames.ROOT), ColNames.SIZE]])
 
     # Execute operation
-    tqdm.pandas(desc=TQDMDesc.ELEMENTS[op_name].build(indent=1), bar_format=TQDM_BAR) #------- TQDM ------
-    files_df[op_name] = files_df.progress_apply(lambda row: op_func(row[ColNames.FILE_PATH], row[dest(ColNames.FILE_PATH)]), axis=1)
-    files_df = add_stat(prefix="Dest", metrics=["st_dev", "st_ino"]).run(files_df)
-    files_df = add_file_id(prefix="Dest").run(files_df)
+    op_results = execute_op(files_df, op_name)
+    print_results(op_results.values, unit="files")
+    files_df = files_df.loc[op_results]
+    files_df = add_stat(metrics=["st_ino"], src_cols=dest(ColNames.FILE_PATH), dest_col=dest(ColNames.FILE_STAT)).run(files_df)
+    files_df = expand_stat(src_col=dest(ColNames.FILE_STAT), key_mapping={"st_ino":dest(ColNames.INODE)}).run(files_df)
+    files_df = add_file_id(src_cols=[dest(ColNames.INODE_DEV), dest(ColNames.INODE)], dest_col=dest(ColNames.FILE_ID)).run(files_df)
 
-    n_total = len(files_df)
-    n_succeeded = len(files_df[op_name].loc[files_df[op_name].isna()])
-    n_failed = len(files_df[op_name].loc[files_df[op_name].notna()])
-    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=n_succeeded, n_total=n_total, share=n_succeeded/n_total)) #--- Notification ---
-    print(Notifications.ELEMENTS["op_failed"].build(indent=3, n=n_failed, n_total=n_total, share=n_failed/n_total)) #--- Notification ---
+    if op_name == "move":
 
-    # Post operation cache sync
-    # Identify successfully completed operation cases
-    completed = files_df.loc[files_df[op_name].isna(), [dest(ColNames.FILE_ID), dest(ColNames.ROOT), dest(ColNames.FILE_PATH)]].set_index(dest(ColNames.FILE_ID))
-    completed = completed.rename(
-        columns = {
-            dest(ColNames.ROOT): ColNames.ROOT,
-            dest(ColNames.FILE_PATH): ColNames.FILE_PATH,
-        }
-    )
-    
+        # Remove empty intermediate dirs
+        rm_results = remove_intermediate_dirs(dir_paths)
+        print_results(rm_results.values, unit="dirs")
+
+        # Log source root and path 
+        move_history = load_json("cache\\move_history.json")
+        log_data = files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID))
+        move_history[timestamp] = log_data.to_dict(orient="index")
+        save_json(move_history, "cache\\move_history.json")
+        # history.add(files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID)))
+
+        # Define clone and delete scope
+        clone = cross_drive[op_results]
+        delete = cross_drive[op_results]
+
+    elif op_name == "copy":
+
+        # Define clone and delete scope
+        clone = pd.Series(True, index=files_df.index)
+        delete = pd.Series(False, index=files_df.index)
+
+    # Update cache
     for cache in (register, metadata):
-        if op_name == "copy" or (op_name == "move" and is_cross_drive):
-            src_to_dest = dict(zip(files_df[ColNames.FILE_ID], files_df[dest(ColNames.FILE_ID)]))
-            cache.clone(src_to_dest)
-            if op_name == "move":
-                # drop stale cache entries
-                cache.delete(list(src_to_dest.keys()))
+        cache.clone(dict(zip(files_df.loc[clone, ColNames.FILE_ID], files_df.loc[clone, dest(ColNames.FILE_ID)])))
+        cache.delete(files_df.loc[delete, ColNames.FILE_ID])
     
-    register.update(completed.convert_dtypes()) # ensure dtype alignment
-    metadata.update(completed[[ColNames.FILE_PATH]].convert_dtypes()) # ensure dtype alignment
+    # Update cloned entries
+    cache_upd = files_df[[dest(ColNames.FILE_ID), dest(ColNames.FILE_PATH), dest(ColNames.ROOT)]]
+    cache_upd = cache_upd.rename(columns={col: col.removeprefix("Dest") for col in cache_upd.columns}).set_index(ColNames.FILE_ID)
+    register.update(cache_upd)
+    metadata.update(cache_upd[[ColNames.FILE_PATH]])
 
-    # potentially add remove dirs here
+    # Save cache
+    register.save(dropna=False)
+    metadata.save(dropna=True)
 
-    return files_df
+    # Save summary
+    save_op_report(files_df, timestamp)
 
 def restore(
         run_id: str,
         op_name: str,
         config: Config,
-    ) -> pd.DataFrame:
+    ) -> None:
 
+    print(f"{op_name.upper()} FILES")
+
+    # Record start timestamp in nanoseconds
     timestamp = time.time_ns()
-
-    op_func = OPERATIONS.get(op_name)
-    if op_func is None:
+    
+    # Validate that the requested operation is supported
+    if op_name not in OPERATIONS:
         raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=OPERATIONS)) #--- Error ---
-
-    if op_name == "move":
-        base = Warnings.ELEMENTS["base"].build()
-        offset = len(base) - Warnings.ANSI_LEN
-        response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
-        if response == "n":
-            return pd.DataFrame()
 
     # Load cache
     register, metadata = config.register, config.metadata
@@ -348,62 +408,34 @@ def restore(
     files_df = pd.DataFrame().from_dict(loaded_history, orient="index")
     files_df = files_df.rename(columns={col:dest(col) for col in files_df.columns})
     files_df = files_df.join(register.data[[ColNames.ROOT, ColNames.FILE_PATH, ColNames.SIZE]], how="left")
+    files_df = add_stat(metrics=["st_dev"], src_cols=ColNames.ROOT, dest_col=ColNames.ROOT_STAT).run(files_df)
+    files_df = expand_stat(src_col=ColNames.ROOT_STAT, key_mapping={"st_dev":ColNames.INODE_DEV}).run(files_df)
+    files_df = add_stat(metrics=["st_dev"], src_cols=dest(ColNames.ROOT), dest_col=dest(ColNames.ROOT_STAT)).run(files_df)
+    files_df = expand_stat(src_col=dest(ColNames.ROOT_STAT), key_mapping={"st_dev":dest(ColNames.INODE_DEV)}).run(files_df)
     files_df = files_df.reset_index(names=[ColNames.FILE_ID])
 
-    # Collect dirs between root and identified files
-    if op_name == "move":
-        intermediate_dirs = set()
-        for row in files_df[[ColNames.ROOT, ColNames.FILE_PATH]].itertuples(index=False):
-            intermediate_dirs.update(get_intermediate_dirs(row.FilePath, row.Root))
-    
-    files_df = execute_op(files_df, op_name, op_func, register, metadata)
-    
-    # Remove empty intermediate dirs
-    inrtermediate_dirs = sorted(intermediate_dirs, key=lambda x: path_depth(x), reverse=True)
-    summary = [remove_dir(intermediate_dir) for intermediate_dir in tqdm(inrtermediate_dirs, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR)]
-    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=sum(summary), n_total=len(summary), share=sum(summary)/len(summary)))
-
-    if op_name == "move":
-        log_data = files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID))
-        move_history[timestamp] = log_data.to_dict(orient="index")
-        save_json(move_history, "cache\\move_history.json")
-
-    # Save cache
-    register.save(dropna=False)
-    metadata.save(dropna=True)
-
-    # Save summary
-    save_op_report(files_df, timestamp)
-
-    return files_df
+    # Run operation pipeline
+    run_op_pipeline(files_df, register, metadata, op_name, timestamp)
 
 def organise(
         src_roots: list[str],
         dest_root: str,
         op_name: str,
         config: Config,
-        file_categories: list[str] = None,
+        file_categories: None | list[str] = None,
         clear_cache: bool = False,
-    ) -> pd.DataFrame:
+    ) -> None:
     
     # implement category consistency check
+    
+    print(f"{op_name.upper()} FILES")
 
+    # Record start timestamp in nanoseconds
     timestamp = time.time_ns()
     
-    is_cross_drive = check_cross_drive(src_roots, dest_root)
-    drive_scope = "ACROSS DRIVES" if is_cross_drive else "ON THE SAME DRIVE"
-    print(f"{op_name.upper()} FILES {drive_scope}")
-
-    op_func = OPERATIONS.get(op_name)
-    if op_func is None:
+    # Validate that the requested operation is supported
+    if op_name not in OPERATIONS:
         raise ValueError(Errors.ELEMENTS["unknown_value"].build(received=op_name, expected=OPERATIONS)) #--- Error ---
-
-    if op_name == "move":
-        base = Warnings.ELEMENTS["base"].build()
-        offset = len(base) - Warnings.ANSI_LEN
-        response = input(f"{base}Source files will be permanently deleted\n{" "*offset}\\__Proceed? [y/N]: ").strip().lower()
-        if response == "n":
-            return pd.DataFrame()
 
     # Load cache
     register, metadata = config.register, config.metadata
@@ -412,12 +444,14 @@ def organise(
             cache.clear()
         else:
             cache.load()
-
-    # Load services
+    # Load external service
     exif = config.exif
-
-    # Load ref, dir_schema
+    # Load dir schema
     dir_schema = config.dir_schema
+
+    # Normalize incoming passes
+    src_roots = list({os.path.normpath(src_root) for src_root in src_roots})
+    dest_root = os.path.normpath(dest_root)
 
     # Validate and select source roots
     root_locs = inspect_directories(src_roots)
@@ -440,7 +474,7 @@ def organise(
 
     # Pre-processing
     files_df = pd.DataFrame(file_records, columns=[ColNames.ROOT, ColNames.ROOT_PROCESSING_DEPTH, ColNames.FILE_DIR_PATH, ColNames.FILE_DIR_DEPTH, ColNames.FILE_NAME])
-
+    
     #--- Notification ---
     print("\nFiles found")
     for root in files_df[ColNames.ROOT].unique():
@@ -450,73 +484,69 @@ def organise(
     files_df[ColNames.EXIF_ARGS] = "".join(EXIFTOOL_ARGS)
     files_df[dest(ColNames.ROOT)] = dest_root
     files_df = assemble_file_path(prefix="").run(files_df)
-    files_df = add_stat(prefix="", metrics=["st_size", "st_mtime", "st_dev", "st_ino"]).run(files_df)
-    files_df = add_file_id(prefix="").run(files_df)
-
-    # Check if there is enough space to process files
-    if op_name == "copy" or (op_name == "move" and is_cross_drive):
-        required = files_df[ColNames.SIZE].sum()
-        _, _, free = shutil.disk_usage(dest_root)
-        if required >= free:
-            required_gb = bytes_converter(required, "GB")
-            free_gb = bytes_converter(free, "GB")
-            raise RuntimeError(Errors.ELEMENTS["low_disk_space"].build(op=op_name, required=required_gb, free=free_gb)) #--- Error ---
-
-    new_files_df = files_df[~files_df[ColNames.FILE_ID].isin(register.data.index)].set_index(ColNames.FILE_ID)
-    known_files_df = files_df[files_df[ColNames.FILE_ID].isin(register.data.index)].set_index(ColNames.FILE_ID)
-
+    files_df = add_stat(metrics=["st_dev"], src_cols=ColNames.ROOT, dest_col=ColNames.ROOT_STAT).run(files_df)
+    files_df = expand_stat(src_col=ColNames.ROOT_STAT, key_mapping={"st_dev":ColNames.INODE_DEV}).run(files_df)
+    files_df = add_stat(metrics=["st_dev"], src_cols=dest(ColNames.ROOT), dest_col=dest(ColNames.ROOT_STAT)).run(files_df)
+    files_df = expand_stat(src_col=dest(ColNames.ROOT_STAT), key_mapping={"st_dev":dest(ColNames.INODE_DEV)}).run(files_df)
+    files_df = add_stat(metrics=["st_size", "st_mtime", "st_ino"], src_cols=ColNames.FILE_PATH, dest_col=ColNames.FILE_STAT).run(files_df)
+    files_df = expand_stat(src_col=ColNames.FILE_STAT, key_mapping={"st_size":ColNames.SIZE, "st_mtime":ColNames.MODIFIED_AT, "st_ino":ColNames.INODE}).run(files_df)
+    files_df = add_file_id(src_cols=[ColNames.INODE_DEV, ColNames.INODE], dest_col=ColNames.FILE_ID).run(files_df)
+    
     # Identify changed files
-    changed_files_df = pd.DataFrame()
-    if not known_files_df.empty:
-        date_change = register.data.loc[known_files_df.index, ColNames.MODIFIED_AT] != known_files_df[ColNames.MODIFIED_AT] # risky check for float type
-        size_change = register.data.loc[known_files_df.index, ColNames.SIZE] != known_files_df[ColNames.SIZE]
-        args_change = register.data.loc[known_files_df.index, ColNames.EXIF_ARGS] != known_files_df[ColNames.EXIF_ARGS]
-        changed_files_df = known_files_df.loc[date_change | size_change | args_change]
+    if register.data.empty:
+        register.data = register.data.reindex(columns=registry_cols)
+    
+    registry_cols = registry_filter.select(files_df.columns)
+    known_df = files_df[files_df[ColNames.FILE_ID].isin(register.data.index)].set_index(ColNames.FILE_ID)
+    new_df = files_df[~files_df[ColNames.FILE_ID].isin(register.data.index)].set_index(ColNames.FILE_ID)
+    date_change = known_df[ColNames.MODIFIED_AT].ne(register.data.loc[known_df.index, ColNames.MODIFIED_AT])
+    size_change = known_df[ColNames.SIZE].ne(register.data.loc[known_df.index, ColNames.SIZE])
+    args_change = known_df[ColNames.EXIF_ARGS].ne(register.data.loc[known_df.index, ColNames.EXIF_ARGS])
+    changed_df = known_df[date_change | size_change | args_change]
 
     print("\nFiles processing")
     n_total = len(files_df)
-    n_loaded = len(known_files_df) - len(changed_files_df)
+    n_loaded = len(known_df) - len(changed_df)
     print(Notifications.ELEMENTS["cache_load"].build(indent=1, n=n_loaded, n_total=n_total, share=n_loaded/n_total))#--- Notification ---
-
+    
     # Extract exif metadata
-    to_exif_df = pd.concat([new_files_df, changed_files_df]).reset_index()[[ColNames.FILE_PATH, ColNames.FILE_ID]]
-    if not to_exif_df.empty:
-        files_to_exif = to_exif_df[ColNames.FILE_PATH].to_list()
-        n_files = len(files_to_exif)
-        exif_results = list(tqdm(exif.extract(files_to_exif, args=EXIFTOOL_ARGS), total=n_files, desc=TQDMDesc.ELEMENTS["extract"].build(indent=1), bar_format=TQDM_BAR)) #------- TQDM ------
-        exif_df = pd.DataFrame(exif_results)
-        exif_df["SourceFile"] = exif_df["SourceFile"].apply(os.path.normpath)
-        exif_df = exif_df.merge(to_exif_df, how="left", left_on="SourceFile", right_on=ColNames.FILE_PATH)
-        exif_df = exif_df.drop(columns="SourceFile")
+    files_to_exif = new_df[ColNames.FILE_PATH].to_list() + changed_df[ColNames.FILE_PATH].to_list()
+    if files_to_exif:
+        exif_results = list(tqdm(exif.extract(files_to_exif, args=EXIFTOOL_ARGS), total=len(files_to_exif), desc=TQDMDesc.ELEMENTS["extract"].build(indent=1), bar_format=TQDM_BAR)) #------- TQDM ------
+        exif_df = pd.DataFrame(exif_results).rename(columns={"SourceFile":ColNames.FILE_PATH})
+        exif_df[ColNames.FILE_PATH] = exif_df[ColNames.FILE_PATH].apply(os.path.normpath)
+        exif_df = exif_df.merge(files_df[[ColNames.FILE_ID, ColNames.FILE_PATH]], how="left", on=ColNames.FILE_PATH)
         exif_df = exif_df.set_index(ColNames.FILE_ID)
 
     # Update cache
-    if not changed_files_df.empty:
-        register.update(changed_files_df[registry_cols.select(changed_files_df.columns)].convert_dtypes()) # ensure dtype alignment
-        metadata.update(exif_df.loc[exif_df.index.isin(changed_files_df.index)].convert_dtypes()) # ensure dtype alignment
-
-    if not new_files_df.empty:
-        register.add(new_files_df[registry_cols.select(new_files_df.columns)])
-        metadata.add(exif_df.loc[exif_df.index.isin(new_files_df.index)])
+    if not changed_df.empty:
+        register.update(changed_df[registry_cols]) # ensure dtype alignment
+        metadata.update(exif_df.loc[changed_df.index]) # ensure dtype alignment, probably better exif_df.loc[exif_df.index.isin(changed_files_df.index)]
+    if not new_df.empty:
+        register.add(new_df[registry_cols])
+        metadata.add(exif_df.loc[new_df.index])
 
     # Select metadata
-    metadata_df = metadata.data[metadata.data.index.isin(files_df[ColNames.FILE_ID])]
-    metadata_df = metadata_df[metadata_cols.select(metadata_df.columns)]
+    metadata_cols = metadata_filter.select(metadata.data.columns)
+    metadata_df = metadata.data.loc[metadata.data.index.isin(files_df[ColNames.FILE_ID]), metadata_cols]
 
     # Enrich files with exif metadata
     files_df = files_df.merge(metadata_df, how="left", left_on=ColNames.FILE_ID, right_index=True)
-    files_df = consolidate_file_ext().run(files_df)
+    files_df = consolidate_file_ext(src_cols=[ColNames.FILE_TYPE_EXT, ColNames.FILE_NAME], dest_col=ColNames.CONSOLIDATED_EXT).run(files_df)
 
     # Get categories from ref
     files_df = files_df.merge(config.ref[[ColNames.FILE_EXT, ColNames.FILE_CATEGORY]], how="left", left_on=ColNames.CONSOLIDATED_EXT, right_on=ColNames.FILE_EXT)
     files_df[ColNames.FILE_CATEGORY] = files_df[ColNames.FILE_CATEGORY].fillna("Other")
 
     # Filter file category
-    if file_categories:
-        files_df = FilterRows(Condition(ColNames.FILE_CATEGORY, "isin", file_categories)).run(files_df)
-        print(Notifications.ELEMENTS["selected"].build(indent=1, n=len(files_df), n_total=n_total, share=len(files_df)/n_total)) #--- Notification ---
-        if files_df.empty:
-            raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
+    category_mask = (Condition(ColNames.FILE_CATEGORY, "isin", file_categories) if file_categories else AllRows()).apply(files_df)
+    files_df = files_df.loc[category_mask]
+    n_total = len(category_mask)
+    n_filtered = n_total - category_mask.sum()
+    share = n_filtered/n_total if n_total else 0.0
+    print(Notifications.ELEMENTS["filtered"].build(indent=1, n=n_filtered, n_total=n_total, share=share)) #--- Notification ---
+    if files_df.empty:
+        raise ValueError(Errors.ELEMENTS["empty"].build(subject="files")) #--- Error ---
 
     # Resolve dest dir schema
     unique_categories = files_df[ColNames.FILE_CATEGORY].unique()
@@ -538,35 +568,8 @@ def organise(
     # Assemble dest file path
     files_df = assemble_file_path(prefix="Dest").run(files_df)
 
-    # Collect dirs between root and identified files
-    if op_name == "move":
-        intermediate_dirs = set()
-        for row in files_df[[ColNames.ROOT, ColNames.FILE_PATH]].itertuples(index=False):
-            intermediate_dirs.update(get_intermediate_dirs(row.FilePath, row.Root))
-
-    # Execute operation
-    files_df = execute_op(files_df, op_name, op_func, register, metadata)
-
-    # Remove empty intermediate dirs
-    inrtermediate_dirs = sorted(intermediate_dirs, key=lambda x: path_depth(x), reverse=True)
-    summary = [remove_dir(intermediate_dir) for intermediate_dir in tqdm(inrtermediate_dirs, desc=TQDMDesc.ELEMENTS["remove"].build(indent=1), bar_format=TQDM_BAR)]
-    print(Notifications.ELEMENTS["op_done"].build(indent=3, n=sum(summary), n_total=len(summary), share=sum(summary)/len(summary)))
-
-    # Store src to dest file id pair
-    if op_name == "move":
-        move_history = load_json("cache\\move_history.json")
-        log_data = files_df[[dest(ColNames.FILE_ID), ColNames.ROOT, ColNames.FILE_PATH]].set_index(dest(ColNames.FILE_ID))
-        move_history[timestamp] = log_data.to_dict(orient="index")
-        save_json(move_history, "cache\\move_history.json")
-
-    # Save cache
-    register.save(dropna=False)
-    metadata.save(dropna=True)
-    
-    # Save summary
-    save_op_report(files_df, timestamp)
-
-    return files_df
+    # Run operation pipeline
+    run_op_pipeline(files_df, register, metadata, op_name, timestamp)
 
 def main():
     parser = argparse.ArgumentParser(description="File organiser")
@@ -603,7 +606,7 @@ def main():
         exif=Exif(path=EXIFTOOL_PATH, encoding=EXIFTOOL_ENCODING, batch_size=EXIFTOOL_BATCH_SIZE),
         csv_writer=CSVWriter(encoding="utf-8-sig"),
         dir_schema=load_json(DIR_SCHEMA_PATH),
-        schema_dims_map=build_dims_map(geocoder=RGeocoder(mode=1, verbose=False), date_parser=DateParser(), date_col_filter=date_cols)
+        schema_dims_map=build_dims_map(geocoder=RGeocoder(mode=1, verbose=False), date_parser=DateParser(), date_col_filter=date_filter)
     )
 
     if args.command == "organise":

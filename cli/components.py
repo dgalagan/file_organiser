@@ -67,7 +67,7 @@ class Errors(Component):
     SEPARATOR: ClassVar[str] = Separator.SPACE
     ANSI_LEN: ClassVar[int] = len(Color.RED + Color.RESET)
 
-    Options = Literal["empty", "exception", "unknown_value", "low_disk_space"]
+    Options = Literal["empty", "exception", "unknown_value", "low_drive_space"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "empty":(
             Template()
@@ -87,11 +87,11 @@ class Errors(Component):
             .token(SEPARATOR)
             .message("Unknown value: {received}. Expected: {expected}")
         ),
-        "low_disk_space":(
+        "low_drive_space":(
             Template()
             .token(ICON)
             .token(SEPARATOR)
-            .message("Not enough space to {op} files: need {required} GB, {free} GB free")
+            .message("Not enough free space on {drive}: required {required} GB, free {free} GB")
         )
     }
 
@@ -123,7 +123,7 @@ class Notifications(Component):
     ICON:  ClassVar[str] = Icon.INFORMATION
     SEPARATOR: ClassVar[str] = Separator.SPACE
     
-    Options = Literal["root_stat", "cache_load", "selected", "op_done", "op_failed", "save_done"]
+    Options = Literal["root_stat", "cache_load", "filtered", "op_done", "op_failed", "save_done"]
     ELEMENTS: ClassVar[dict[Options, Template]] = {
         "root_stat": (
             Template()
@@ -138,11 +138,11 @@ class Notifications(Component):
             .padding(30)
             .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
         ),
-        "selected": (
+        "filtered": (
             Template()
             .token(ICON)
             .token(SEPARATOR)
-            .message("Selected files")
+            .message("Filtered")
             .padding(30)
             .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
         ),
@@ -152,7 +152,7 @@ class Notifications(Component):
             .token(SEPARATOR)
             .message(f"Done")
             .padding(42)
-            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
+            .message("- {n:>6,} of {n_total:>6,} {unit} ({share:>6.1%})")
         ),
         "op_failed": (
             Template()
@@ -160,7 +160,7 @@ class Notifications(Component):
             .token(SEPARATOR)
             .message("Failed")
             .padding(35)
-            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
+            .message("- {n:>6,} of {n_total:>6,} {unit} ({share:>6.1%})")
         ),
         "save_done": (
             Template()

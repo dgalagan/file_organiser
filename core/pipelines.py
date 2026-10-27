@@ -18,21 +18,18 @@ from reverse_geocoder import RGeocoder
 ########### HELPERS ###########
 ###############################
 
-def safe_stat(file_path: str, metrics: list[str], prefix: str) -> os.stat_result | None:
+def safe_stat(path: str, metrics: list[str]) -> dict | None:
+    try:
+        stat = os.stat(path)
+        return {metric: getattr(stat, metric) for metric in metrics}
+    except (OSError, FileNotFoundError):
+        #implement logging
+        return None
 
-    stat_cols = {
-        "st_size": add_prefix(ColNames.SIZE, prefix),
-        "st_mtime": add_prefix(ColNames.MODIFIED_AT, prefix),
-        "st_dev": add_prefix(ColNames.INODE_DEV, prefix),
-        "st_ino": add_prefix(ColNames.INODE, prefix),
-    }
-
-    if os.path.isfile(file_path):
-        try:
-            stat = os.stat(file_path)
-            return {stat_cols[metric]: getattr(stat, metric) for metric in metrics}
-        except OSError:
-            return None
+def get_id(row: pd.Series) -> str:
+    dev = row.get(ColNames.INODE_DEV, row.get(dest(ColNames.INODE_DEV)))
+    ino = row.get(ColNames.INODE, row.get(dest(ColNames.INODE)))
+    return hashlib.md5(f"{dev}|{ino}".encode()).hexdigest()
 
 def duplicated_ci(df: pd.DataFrame, keep: Literal[False, "first", "last"]) -> pd.DataFrame:
     return df.iloc[:, 0].str.lower().duplicated(keep=keep)
@@ -55,11 +52,6 @@ def resolve_ext(row: pd.Series) -> str:
     _, ext = parse_filename(row[ColNames.FILE_NAME])
     exif_ext = row[ColNames.FILE_TYPE_EXT]
     return uppercase_text(ext) if pd.isna(exif_ext) else exif_ext
-
-def get_id(row: pd.Series, prefix: str) -> str:
-    dev = row[add_prefix(ColNames.INODE_DEV, prefix)]
-    ino = row[add_prefix(ColNames.INODE, prefix)]
-    return hashlib.md5(f"{dev}|{ino}".encode()).hexdigest()
 
 def get_country(row: pd.Series, geocoder: RGeocoder) -> str | None:
     lat = row[ColNames.EXIF_GPS_LATITUDE]
@@ -145,30 +137,29 @@ def assemble_file_path(prefix: Literal['', "Dest"]):
         ]
     )
 
-def add_stat(prefix: Literal['', "Dest"], metrics: Literal["st_size", "st_mtime", "st_dev", "st_ino"]):
-    return Pipeline(
-        [
-            Compute(
-                ElementProcessor(safe_stat, metrics=metrics, prefix=prefix), NameFilter(add_prefix(ColNames.FILE_PATH, prefix)),
-                dest_col=add_prefix(ColNames.FILE_STAT, prefix)
-            ),
-            ExpandDict(
-                col=add_prefix(ColNames.FILE_STAT, prefix),
-                where=Condition(add_prefix(ColNames.FILE_STAT, prefix), "notna")
-            )
-        ]
+def add_stat(metrics: Literal["st_size", "st_mtime", "st_dev", "st_ino"], src_cols: str | list[str], dest_col: str):
+    return Compute(
+        ElementProcessor(safe_stat, metrics=metrics), NameFilter(src_cols),
+        dest_col=dest_col
     )
 
-def add_file_id(prefix: Literal['', "Dest"]):
-    return Compute(
-        RowProcessor(get_id, prefix=prefix), NameFilter([add_prefix(ColNames.INODE_DEV, prefix), add_prefix(ColNames.INODE, prefix)]),
-        dest_col=add_prefix(ColNames.FILE_ID, prefix)
+def expand_stat(src_col: str, key_mapping: dict[str, str]):
+    return ExpandDict(
+        col=src_col,
+        key_to_col=key_mapping,
+        where=Condition(src_col, "notna")
     )
 
-def consolidate_file_ext():
+def add_file_id(src_cols: str | list[str], dest_col: str):
     return Compute(
-        RowProcessor(resolve_ext), NameFilter([ColNames.FILE_TYPE_EXT, ColNames.FILE_NAME]),
-        dest_col=ColNames.CONSOLIDATED_EXT
+        RowProcessor(get_id), NameFilter(src_cols),
+        dest_col=dest_col
+    )
+
+def consolidate_file_ext(src_cols: str | list[str], dest_col: str):
+    return Compute(
+        RowProcessor(resolve_ext), NameFilter(src_cols),
+        dest_col=dest_col
     )
 
 def build_dims_map(geocoder: RGeocoder, date_parser: DateParser, date_col_filter: ColumnFilter) -> dict[str, Pipeline | Compute]:
