@@ -6,7 +6,7 @@ Category = Literal[
     "Application", "Archive", "Audio", "Cache", "Config", "Database",
     "Data-Excel", "Data-PowerPoint", "Data-PowerBI", "Data-Other",
     "Documents-Text", "Documents-Word", "Documents-PDF", "Documents-BIB",
-    "Ebook", "Email", "Image","Script", "SystemBackup", "Video", "Web", "Other"
+    "Ebook", "Email", "Image", "Script", "SystemBackup", "Video", "Web", "Other"
 ]
 
 class CategorySelection:

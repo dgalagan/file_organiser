@@ -1,21 +1,15 @@
-class Token:
+from enum import StrEnum, IntEnum
 
-    def repeat_with_delim(self, count: int, delim: str = "") -> str:
-        if not isinstance(count, int) or count < 1:
-            raise ValueError(f"count must be an int > 0, got {type(count).__name__} with value {count}")
-        if not isinstance(delim, str):
-            raise ValueError(f"delimiter must be a string, got {type(delim).__name__}")
-        return delim.join([self.value] * count)
+class Ansi(IntEnum):
+    CYAN = 6
+    RED = 9
+    GREEN = 10
+    YELLOW = 11
+    ISLAMIC_GREEN = 34
+    MENTHOL = 157
+    GRAY = 244
 
-    def repeat(self, count: int) -> str:
-        if not isinstance(count, int) or count < 1:
-            raise ValueError(f"count must be an int > 0, got {type(count).__name__} with value {count}")
-        return self.value * count
-
-    def get(self):
-        return self.value
-
-class Separator(Token):
+class Separator(StrEnum):
     SPACE =             ' '
     DASH =              '-'
     COMMA =             ','
@@ -24,7 +18,15 @@ class Separator(Token):
     FORWARDSLASH =      '/'
     BACKSLASH =         '\\'
 
-class Emoji(Token):
+class Icon:
+    CHECKMARK =          "-v-"
+    CROSSMARK =          "-x-"
+    GREATERTHAN =        "[>]"
+    INFORMATION =        "[i]"
+    WARNING =            "[!]"
+    DASH =               "[-]"
+
+class Emoji:
     KEYBOARD =          '⌨️' + Separator.SPACE
     SCISSORS =          '✂️' + Separator.SPACE
     GEAR =              '⚙️' + Separator.SPACE
@@ -47,19 +49,3 @@ class Emoji(Token):
     CHEQUEREDFLAG =     '🏁'
     FILEFOLDER =        '📁'
     OPENFILEFOLDER =    '📂'
-
-class Icon(Token):
-    CHECKMARK =          "[✓]"
-    CROSSMARK =          "[✗]"
-    GREATERTHAN =        "[>]"
-    INFORMATION =        "[i]"
-    WARNING =            "[!]"
-
-class Color:
-    GREEN = "\033[1;38;5;34m"
-    LIGHT_GREEN = "\033[1;38;5;157m"
-    RED = "\033[31m"
-    YELLOW = "\033[33m"
-    CYAN = "\033[36m"
-    GREY  = "\033[90m"
-    RESET = "\033[0m"

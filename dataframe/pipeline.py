@@ -55,12 +55,28 @@ class ExpandDict(Step):
 @dataclass
 class Label(Step):
     dest_col: str
-    value: str # value type probably should be any
-    where: Predicate = None
+    label_to_cond: dict[str, Predicate]
 
     def run(self, df: pd.DataFrame):
-        mask = self.where.apply(df) if self.where else pd.Series(True, index=df.index)
-        df.loc[mask, self.dest_col] = self.value
+        if self.dest_col:
+            if self.dest_col not in df.columns:
+                df[self.dest_col] = None
+            for label, cond in self.label_to_cond.items():
+                mask = cond.apply(df) if cond else pd.Series(True, index=df.index)
+                df.loc[mask, self.dest_col] = label
+        return df
+
+# GroupBy CumOperation
+@dataclass
+class CumCount(Step):
+    col: str
+    dest_col: str
+
+    def run(self, df: pd.DataFrame):
+        if self.dest_col:
+            if self.dest_col not in df.columns:
+                df[self.dest_col] = None
+            df[self.dest_col] = df.groupby(by=self.col, dropna=False).cumcount()
         return df
 
 # Compute

@@ -11,7 +11,7 @@ create_dt = CombinedFilter(
 access_dt = KeywordFilter(["accessdate", "lastplayed", "lastprinted"])
 modify_dt = KeywordFilter(["datemodify", "lastsaved", "lastupdated", "moddate", "modifydate", "metadatadate", "sourcemodified"])
 date_filter = CombinedFilter([create_dt, access_dt, modify_dt])
-registry_filter = NameFilter([ColNames.ROOT, ColNames.FILE_PATH, ColNames.MODIFIED_AT, ColNames.SIZE, ColNames.EXIF_ARGS])
+registry_filter = NameFilter([ColNames.INODE_DEV, ColNames.ROOT, ColNames.FILE_PATH, ColNames.MODIFIED_AT, ColNames.SIZE, ColNames.EXIF_ARGS])
 metadata_filter = CombinedFilter(
     [
         date_filter,

@@ -1,207 +1,33 @@
-from dataclasses import dataclass, field
-from cli.tokens import Emoji, Separator, Icon, Color
-from typing import Literal, ClassVar, get_args
+from cli.content import Colored, Content
+from cli.layout import Cell, Layout
+from cli.tokens import Icon, Ansi
+import pandas as pd
+from typing import Mapping
 
-@dataclass
-class Template():
-    construct: list = field(default_factory=list)
+STEP_LAYOUT = Layout([Cell(20), Cell(20, "left"), Cell(20)])
+COUNT_LAYOUT = Layout([Cell(20), Cell(5, "center"), Cell(20)])
 
-    # String items
-    def token(self, value):
-        self.construct.append(value)
-        return self
-    def message(self, value):
-        self.construct.append(value)
-        return self
-    def padding(self, num: int, align: Literal["<", ">", "^"] = "<"):
-        to_collapse = []
-        for item in list(self.construct):
-            if isinstance(item, tuple):
-                continue
-            else:
-                to_collapse.append(item)
-                self.construct.remove(item)
-        self.construct.append(("".join(to_collapse), num, align))
-        return self
+def bool_summary(
+        data: pd.Series,
+        layout: Layout = STEP_LAYOUT,
+        *,
+        desc: str = "",
+        icon: Mapping[bool, str | Colored] = {True: Colored(Icon.CHECKMARK, Ansi.GREEN), False: Colored(Icon.CROSSMARK, Ansi.RED)},
+        label: Mapping[bool, str] = {True: "succeeded", False: "failed"},
+        stat_format: str = "{n:,}/{total:,}"
+) -> str:
+    total = len(data)
+    counts = data.value_counts()
+    return '\n'.join(layout.render([desc, icon.get(flag, '') + ' ' + label.get(flag, ''), stat_format.format(n=n, total=total)]) for flag, n in counts.items())
 
-    # String items assembly
-    def build(self, indent: int = 0, **kwargs):
-        result = ""
-        for item in self.construct:
-            if isinstance(item, tuple):
-                part, pad, align = item
-                result += f"{part.format(**kwargs):{align}{pad}}"
-            else:
-                result += item
-        return f"{indent * '  '}{result.format(**kwargs)}"
+def search_count(
+        layout: Layout = COUNT_LAYOUT,
+        *,
+        desc: str = '',
+        path: str = '',
+        n: int = 0
+) -> str:
+    return layout.render([desc, str(n), path])
 
-@dataclass
-class Component():
-
-    def __init_subclass__(cls):
-        declared = set(get_args(cls.Options))
-        defined = set(cls.ELEMENTS)
-        if declared != defined:
-            raise TypeError(f"Option drift in {cls.__name__}: {defined ^ declared}")
-
-@dataclass
-class Prompt(Component):
-
-    ICON:  ClassVar[str] = f"{Color.CYAN}{Icon.GREATERTHAN}{Color.RESET}" #{5chars}{3chars}{4chars}
-    SEPARATOR: ClassVar[str] = Separator.SPACE
-    ANSI_LEN: ClassVar[int] = len(Color.CYAN + Color.RESET)
-
-    Options = Literal["depth_input"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "depth_input": (
-        Template()
-        .token(ICON)
-        .message(" {num:^5} {dir_path}")
-        )
-    }
-
-@dataclass
-class Errors(Component):
-
-    ICON:  ClassVar[str] = f"{Color.RED}{Icon.CROSSMARK}{Color.RESET}" #{5chars}{3chars}{4chars}
-    SEPARATOR: ClassVar[str] = Separator.SPACE
-    ANSI_LEN: ClassVar[int] = len(Color.RED + Color.RESET)
-
-    Options = Literal["empty", "exception", "unknown_value", "low_drive_space"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "empty":(
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("{subject}: not found")
-        ),
-        "exception":(
-             Template()
-             .token(ICON)
-             .token(SEPARATOR)
-             .message("Error {errno}: {path}")
-        ),
-        "unknown_value":(
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Unknown value: {received}. Expected: {expected}")
-        ),
-        "low_drive_space":(
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Not enough free space on {drive}: required {required} GB, free {free} GB")
-        )
-    }
-
-@dataclass
-class Warnings(Component):
-
-    ICON:  ClassVar[str] = f"{Color.YELLOW}{Icon.WARNING}{Color.RESET}"
-    SEPARATOR: ClassVar[str] = Separator.SPACE
-    ANSI_LEN: ClassVar[int] = len(Color.YELLOW + Color.RESET)
-
-    Options = Literal["base", "invalid_input"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "base": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-        ),
-        "invalid_input": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Invalid input")
-        ),
-    }
-
-@dataclass
-class Notifications(Component):
-
-    ICON:  ClassVar[str] = Icon.INFORMATION
-    SEPARATOR: ClassVar[str] = Separator.SPACE
-    
-    Options = Literal["root_stat", "cache_load", "selected", "op_done", "op_failed", "save_done"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "root_stat": (
-            Template()
-            .token(ICON)
-            .message("{n:^15,}{dir_path}")
-        ),
-        "cache_load": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Metadata from cache")
-            .padding(30)
-            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
-        ),
-        "selected": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Selected")
-            .padding(30)
-            .message("- {n:>6,} of {n_total:>6,} files ({share:>6.1%})")
-        ),
-        "op_done": (
-            Template()
-            .token(f"{Color.GREEN}{Icon.CHECKMARK}{Color.RESET}")
-            .token(SEPARATOR)
-            .message(f"Done")
-            .padding(42)
-            .message("- {n:>6,} of {n_total:>6,} {unit} ({share:>6.1%})")
-        ),
-        "op_failed": (
-            Template()
-            .token(f"{Color.RED}{Icon.CROSSMARK}{Color.RESET}")
-            .token(SEPARATOR)
-            .message("Failed")
-            .padding(35)
-            .message("- {n:>6,} of {n_total:>6,} {unit} ({share:>6.1%})")
-        ),
-        "save_done": (
-            Template()
-            .message("Summary saved -> {path}")
-        ),
-    }
-
-@dataclass
-class TQDMDesc(Component):
-    
-    ICON:  ClassVar[str] = Icon.GREATERTHAN
-    SEPARATOR: ClassVar[str] = Separator.SPACE
-
-    Options = Literal["extract", "copy", "move", "remove"]
-    ELEMENTS: ClassVar[dict[Options, Template]] = {
-        "extract": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Extract files metadata")
-            .padding(30)
-        ),
-        "copy": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Copy files")
-            .padding(30)
-        ),
-        "move": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Move files")
-            .padding(30)
-        ),
-        "remove": (
-            Template()
-            .token(ICON)
-            .token(SEPARATOR)
-            .message("Remove dirs")
-            .padding(30)
-        ),
-    }
+def tqdm_bar(cell_widths: tuple[int, int] = (20, 20)) -> str:
+    return f"|{{desc:{cell_widths[0]}}}|{{bar:{cell_widths[1]}}}|{{n_fmt}}/{{total_fmt}} [{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]|"

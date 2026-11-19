@@ -1,21 +1,27 @@
-from cli.components import Errors
+from core.col_names import ColNames
 from dataclasses import dataclass
 from dataframe.write import JSONWriter
 from dataframe.load import JSONLoader
-import pandas as pd
 import os
+import pandas as pd
+from utils.checks import ensure_not_empty
+
 
 @dataclass
 class Cache:
     path: str
     loader: JSONLoader
     writer: JSONWriter
+    schema: dict[ColNames, str] = None
     data: pd.DataFrame = None
 
     def __post_init__(self):
         if not os.path.exists(self.path):
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
-            self.writer.save(pd.DataFrame(), self.path)
+            self.data = pd.DataFrame(columns=self.schema.keys()).astype(self.schema) if self.schema else pd.DataFrame()
+            self.save()
+        else:
+            self.data = self.loader.load(self.path)
 
     def _require_loaded(self) -> None:
         if self.data is None:
@@ -23,14 +29,14 @@ class Cache:
 
     def _require_data(self) -> None:
         self._require_loaded()
-        if self.data.empty:
-            raise ValueError(Errors.ELEMENTS["empty_input"].build(subject="cache"))
+        ensure_not_empty(self.data)
 
-    def load(self) -> None:
-        self.data = self.loader.load(self.path)
+    def _apply_schema(self):
+        if self.schema:
+            self.data = self.data.astype(self.schema)
 
     def clear(self) -> None:
-        self.data = pd.DataFrame()
+         self.data = pd.DataFrame(columns=list(self.schema.keys())).astype(self.schema) if self.schema else pd.DataFrame()
 
     def add(self, new_entries: pd.DataFrame) -> None:
         self._require_loaded()
@@ -38,10 +44,12 @@ class Cache:
         if not overlap.empty:
             raise ValueError(f"New entries overlap with existing")
         self.data = pd.concat([self.data, new_entries])
+        self._apply_schema()
 
     def update(self, changed_entries: pd.DataFrame) -> None:
         self._require_data()
         self.data.loc[changed_entries.index, changed_entries.columns] = changed_entries
+        self._apply_schema()
 
     def clone(self, src_to_dest: dict) -> None:
         self._require_data()
@@ -54,4 +62,4 @@ class Cache:
 
     def save(self, dropna: bool = False) -> None:
         self._require_loaded()
-        return self.writer.save(self.data, self.path, dropna=dropna)
+        self.writer.save(self.data, self.path, dropna=dropna)

@@ -13,7 +13,7 @@ class Processor(ABC):
         self.kwargs = kwargs
     
     @abstractmethod
-    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+    def process(self, df: pd.DataFrame) -> pd.DataFrame | pd.Series:
         raise NotImplementedError
     
 @dataclass(init=False)

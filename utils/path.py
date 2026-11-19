@@ -2,7 +2,7 @@ import ctypes
 import os
 import shutil
 from typing import Iterable, Iterator
-from utils.text import strip_text, lstrip_text, rstrip_text, split_text, count_letters, uppercase_text
+from utils.strings import strip_text, lstrip_text, rstrip_text, split_text, count_letters, uppercase_text
 
 # General
 def is_path(path: str) -> bool:

@@ -1,13 +1,12 @@
 class ColNames:
     ROOT = "Root"
     ROOT_PROCESSING_DEPTH = "RootProcessingDepth"
-    ROOT_STAT = "RootStat"
     FILE_NAME = "FileName"
     FILE_EXT = "FileExt"
     FILE_DIR_PATH = "FileDirPath"
     FILE_DIR_DEPTH = "FileDirDepth"
     FILE_PATH = "FilePath"
-    FILE_STAT = "FileStat"
+    OS_STAT = "StatObject"
     SIZE = "Size"
     MODIFIED_AT = "ModifiedAt"
     INODE_DEV = "InodeDev"
@@ -45,3 +44,5 @@ def label(name: str) -> str:
     return f"{name}Label"
 def add_prefix(name: str, prefix: str = '') -> str:
     return f"{prefix}{name}"
+def add_suffix(name: str, suffix: str = '') -> str:
+    return f"{name}{suffix}"

@@ -1,5 +1,25 @@
 from typing import Optional
 
+ESC = "\033"
+RESET = ESC + "[0m"
+
+def color(text: str, code: int, bg: bool = False, bold: bool = False) -> str:
+    sgr = 48 if bg else 38
+    style = 1 if bold else 0
+    return f"{ESC}[{style};{sgr};5;{code}m{text}{RESET}"
+
+def repeat(text: str, count: int, separator: str = "") -> str:
+    if not isinstance(count, int) or count < 1:
+        raise ValueError(f"count must be an int > 0, got {type(count).__name__} with value {count}")
+    if not isinstance(separator, str):
+        raise ValueError(f"delimiter must be a string, got {type(separator).__name__}")
+    return separator.join([text] * count)
+
+def padding(text: str, width: int):
+    return f"{text:<{width}}"
+
+
+
 def lowercase_text(text: str) -> str:
     return text.lower() if isinstance(text, str) else ''
 

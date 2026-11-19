@@ -1,17 +1,93 @@
 {
-    "Default": [
-        ["FileHashDupLabel", true],
-        ["EarliestYear", true]
-    ],
-    "Image": [
-        ["FileHashDupLabel", true],
-        ["EarliestYear", true],
-        ["EXIF:Model", true],
-        ["ImageCountry", true]
-    ],
-    "Data-Excel": [
-        ["FileHashDupLabel", true],
-        ["EarliestYear", true],
-        ["WorksheetsCount", true]
-    ]
+    "Application": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Archive": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Audio": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Cache": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Config": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Database": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Data-Excel": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true,
+        "WorksheetsCount": true
+    },
+    "Data-PowerPoint": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Data-PowerBI": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Data-Other": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Documents-Text": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Documents-Word": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Documents-PDF": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Documents-BIB": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Ebook": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Email": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Image": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true,
+        "EXIF:Model": true,
+        "ImageCountry": true
+    },
+    "Script": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "SystemBackup": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Video": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Web": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    },
+    "Other": {
+        "FileHashDupLabel": true,
+        "EarliestYear": true
+    }
 }

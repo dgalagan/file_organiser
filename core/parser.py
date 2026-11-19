@@ -1,6 +1,6 @@
 import datetime as dt
 import pandas as pd
-from utils.text import get_chars_pattern
+from utils.strings import get_chars_pattern
 
 class DateParser:
     def __init__(self):

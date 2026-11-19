@@ -12,7 +12,7 @@ def get_batches(files: list[str], batch_size: int) -> list[list[str]]:
 class Exif:
     path: str = None # default = PATH
     encoding: str = None # default = locale.getpreferredencoding()
-    batch_size: int = None
+    batch_size: int = 10
 
     def _build_exif(self) -> ExifTool:
         if self.path:
